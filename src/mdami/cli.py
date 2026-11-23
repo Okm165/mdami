@@ -66,7 +66,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_eval = sub.add_parser("eval", help="evaluate annotated evidence links")
     _add_scoring_args(p_eval)
-    p_eval.set_defaults(direction="reverse")
     p_eval.add_argument("--links", type=str, required=True, help="TSV of links")
     return parser
 

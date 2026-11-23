@@ -1,0 +1,116 @@
+{
+  "targets": [
+    {
+      "target_id": "wdt.md@1.4",
+      "evidence_ids": [
+        "wdt.md@500.1"
+      ],
+      "rank": 84,
+      "pool_size": 327
+    },
+    {
+      "target_id": "wdt.md@1.6",
+      "evidence_ids": [
+        "wdt.md@317.1"
+      ],
+      "rank": 88,
+      "pool_size": 327
+    },
+    {
+      "target_id": "wdt.md@72.7",
+      "evidence_ids": [
+        "wdt.md@339.1"
+      ],
+      "rank": 127,
+      "pool_size": 322
+    },
+    {
+      "target_id": "wdt.md@72.10",
+      "evidence_ids": [
+        "wdt.md@180.1"
+      ],
+      "rank": 21,
+      "pool_size": 322
+    },
+    {
+      "target_id": "wdt.md@72.12",
+      "evidence_ids": [
+        "wdt.md@182.1"
+      ],
+      "rank": 94,
+      "pool_size": 322
+    },
+    {
+      "target_id": "wdt.md@110.1",
+      "evidence_ids": [
+        "wdt.md@316.1"
+      ],
+      "rank": 44,
+      "pool_size": 316
+    },
+    {
+      "target_id": "wdt.md@110.13",
+      "evidence_ids": [
+        "wdt.md@351.1"
+      ],
+      "rank": 194,
+      "pool_size": 316
+    },
+    {
+      "target_id": "wdt.md@110.14",
+      "evidence_ids": [
+        "wdt.md@500.1"
+      ],
+      "rank": 43,
+      "pool_size": 316
+    },
+    {
+      "target_id": "wdt.md@110.17",
+      "evidence_ids": [
+        "wdt.md@464.1"
+      ],
+      "rank": 121,
+      "pool_size": 316
+    },
+    {
+      "target_id": "wdt.md@110.21",
+      "evidence_ids": [
+        "wdt.md@380.1"
+      ],
+      "rank": 42,
+      "pool_size": 316
+    },
+    {
+      "target_id": "wdt.md@142.8",
+      "evidence_ids": [
+        "wdt.md@464.1"
+      ],
+      "rank": 125,
+      "pool_size": 325
+    },
+    {
+      "target_id": "wdt.md@142.10",
+      "evidence_ids": [
+        "wdt.md@340.1"
+      ],
+      "rank": 22,
+      "pool_size": 325
+    },
+    {
+      "target_id": "wdt.md@28.14",
+      "evidence_ids": [
+        "wdt.md@481.1"
+      ],
+      "rank": 63,
+      "pool_size": 310
+    }
+  ],
+  "mrr": 0.01861069487006455,
+  "hit_at_3": 0.0,
+  "num_targets": 13,
+  "median_body_tokens": 19.0,
+  "p95_body_tokens": 43.0,
+  "meta": {
+    "run_metadata": "model=Qwen/Qwen3-0.6B-Base@da87bfb608c14b7cf20ba1ce41287e8de496c0cd torch=2.13.0+rocm7.2 backend=HIP 7.2.53211 dtype=bfloat16 device=AMD Radeon Graphics batch_size=32"
+  }
+}

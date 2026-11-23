@@ -67,6 +67,17 @@ the earlier length bias does not come from scope credit.
 Corpus scale: the full `data/ocr` set (418 manuals, 84 MB) parses to
 **1,183,451 atoms**; the 24-manual sample took 19.1 s for 61,636 atoms.
 
+## Second-manual validation (SAMD20G, Watchdog Timer chapter)
+
+`data/experiments/samd20-wdt/` holds the WDT chapter of
+`ATMEL_Corporation__SAMD20G_14__646708.pdf.md` (338 atoms) and 13 annotated
+procedure→definition links, marked before scoring. Qwen3-0.6B-Base, bf16,
+batch 32: forward AMI **MRR 0.105**, Hit@3 0.077; reverse gain MRR 0.019,
+Hit@3 0.000. Best: SYNCBUSY synchronization rank 2, EWCTRL.EWOFFSET rank 4.
+Worst: mode-of-operation sentences and the 0xA5 CLEAR procedure. This
+validates that forward AMI generalizes to a second manual while the
+reverse-gain direction does not (see the direction table above).
+
 ### Pure-AMI model sweep (same corpus, same 13 links, bf16, batch 32)
 
 The **default pin is Qwen3-0.6B-Base** (revision `da87bfb6…`, bfloat16), the
@@ -91,18 +102,15 @@ irrelevant context. To reproduce:
 
 ### Scoring direction (Qwen3-0.6B-Base, bf16, batch 32)
 
-| direction | metric ranked | best use | MRR | Hit@3 |
-|---|---|---|---|---|
-| **reverse h(atom \| target), gain g = h(∅) − h(c)** | bits per body token | corpus targets (`eval` default) | **0.206** | **0.231** |
-| forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)} | PPL difference | literal queries (`rank` default) | 0.169 | 0.154 |
+| direction | metric ranked | SAM3X8E-TC (13 links) | SAMD20-WDT (13 links) |
+|---|---|---|---|
+| **forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)}** | PPL difference | 0.169 | **0.105** |
+| reverse h(atom \| target), gain g = h(∅) − h(c) | bits per body token | **0.206** | 0.019 |
 
-Both are pure likelihood quantities — no heuristics. In the reverse direction
-h(∅) varies per candidate, so the exp-difference AMI mixes in each body's
-a-priori perplexity (MRR 0.019); ranking by the per-token gain instead is the
-pure compression improvement and the measured optimum for corpus targets.
-Literal short queries measure better in the forward direction (the Cortex-M3
-statement target ranks #1 forward, #2 reverse), so `rank` defaults to forward
-and `eval` to reverse; override with `--direction`.
+Both are pure likelihood quantities — no heuristics. The reverse direction won
+decisively on the TC chapter but collapsed on the WDT chapter, so **forward is
+the default** for both `rank` and `eval`: it is the more robust direction
+across manuals. `--direction reverse` reproduces the TC-chapter result.
 Raw reports: `report_reverse_default.json`, and the sweep JSONs above.
 
 ```sh
