@@ -1,5 +1,6 @@
 """Pure (relative_path, text) -> atoms transformation."""
 
+import pysbd
 from markdown_it import MarkdownIt
 
 from .records import Atom, AtomKind, SourceSpan
@@ -7,14 +8,13 @@ from .records import Atom, AtomKind, SourceSpan
 _MAX_SENTENCE_WORDS = 32
 
 _parser = MarkdownIt("commonmark").enable("table")
+_segmenter = pysbd.Segmenter(language="en", clean=False)
 
 
 def _prose_pieces(text: str) -> list[str]:
     """Fold wrapped lines, split sentences, cap length in whitespace words."""
-    import pysbd
-
     folded = " ".join(text.split("\n"))
-    sentences = pysbd.Segmenter(language="en", clean=False).segment(folded)
+    sentences = _segmenter.segment(folded)
     pieces: list[str] = []
     for sentence in sentences:
         words = sentence.split()

@@ -136,8 +136,7 @@ class Scorer:
 
     def _score_batch(self, rows: list[tuple[list[int], list[int]]]) -> list[float]:
         """One right-padded forward pass; logit position P[i]-1+j predicts t[j]."""
-        lengths = [len(prefix) + len(target) for prefix, target in rows]
-        max_len = max(lengths)
+        max_len = max(len(prefix) + len(target) for prefix, target in rows)
         input_ids = torch.zeros(len(rows), max_len, dtype=torch.long)
         attention = torch.zeros(len(rows), max_len, dtype=torch.long)
         prefix_lengths = torch.tensor([len(p) for p, _ in rows])
