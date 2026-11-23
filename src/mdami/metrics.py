@@ -6,12 +6,11 @@ from collections.abc import Sequence
 from .records import Measurement
 
 
-def perplexity(mean_nll_nats: float) -> float:
-    return math.exp(mean_nll_nats)
-
-
 def from_mean_nll(empty: float, conditional: float) -> Measurement:
-    """LongCodeZip AMI: exp(h(empty)) - exp(h(c)), plus bits/token form."""
+    """LongCodeZip AMI: exp(h(empty)) - exp(h(c)), plus bits/token form.
+
+    PPL(empty) = exp(empty), PPL(c) = exp(conditional).
+    """
     ppl_empty, ppl_atom = math.exp(empty), math.exp(conditional)
     return Measurement(
         ppl_empty=ppl_empty,

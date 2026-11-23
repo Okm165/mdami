@@ -9,7 +9,6 @@ from mdami.metrics import (
     hit_at_k,
     mean_reciprocal_rank,
     percentile,
-    perplexity,
 )
 
 
@@ -31,11 +30,6 @@ def test_anchor_probabilities_25_and_50() -> None:
     zero = from_mean_nll(empty, empty)
     assert zero.ami == 0.0
     assert zero.bits_per_target_token == 0.0
-
-
-def test_perplexity_matches_exp() -> None:
-    assert perplexity(0.0) == 1.0
-    assert perplexity(math.log(7)) == pytest.approx(7.0)
 
 
 def test_retrieval_metrics_on_known_ordering() -> None:

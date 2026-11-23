@@ -23,7 +23,10 @@ class RankResult:
     rows: tuple[RankRow, ...]
     excluded_same_leaf: int
     excluded_copy: int
-    pool_size: int
+
+    @property
+    def pool_size(self) -> int:
+        return len(self.rows)
 
 
 def resolve_target(atoms: Sequence[Atom], target: Target) -> tuple[Atom | None, str]:
@@ -117,7 +120,6 @@ def rank(
         rows=rows,
         excluded_same_leaf=same_leaf,
         excluded_copy=copies,
-        pool_size=len(eligible),
     )
 
 
@@ -154,7 +156,7 @@ def evaluate_links(
     per_target: list[dict[str, object]] = []
     ranks: list[int] = []
     body_ranks: list[int] = []
-    body_token_lengths: set[int] = set()
+    distinct_bodies: set[str] = set()
     for target_id, evidence_ids in grouped.items():
         result = rank(
             atoms,
@@ -172,7 +174,7 @@ def evaluate_links(
                 f"{sorted(evidence_ids)}"
             )
         ranks.append(found)
-        body_token_lengths.update(count_tokens(row.atom.body) for row in result.rows)
+        distinct_bodies.update(row.atom.body for row in result.rows)
         entry: dict[str, object] = {
             "target_id": target_id,
             "evidence_ids": list(evidence_ids),
@@ -197,7 +199,7 @@ def evaluate_links(
             entry["rank_by_body"] = body_rank
         per_target.append(entry)
 
-    lengths = sorted(body_token_lengths)
+    lengths = sorted(count_tokens(body) for body in distinct_bodies)
     return EvalReport(
         targets=tuple(per_target),
         mrr=mean_reciprocal_rank(ranks),

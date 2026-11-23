@@ -4,7 +4,6 @@ import csv
 import json
 import sys
 from collections.abc import Iterator
-from dataclasses import asdict
 from pathlib import Path
 
 from .records import Atom, ParseSummary, RankRow
@@ -88,7 +87,3 @@ def rank_row_to_dict(row: RankRow) -> dict[str, object]:
         out["scope_nll"] = row.scope_nll
         out["body_bits"] = row.body_bits
     return out
-
-
-def summary_to_dict(summary: ParseSummary) -> dict[str, object]:
-    return asdict(summary)

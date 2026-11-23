@@ -91,6 +91,7 @@ class Scorer:
         self.model.eval()
         start = getattr(self.model.config, "bos_token_id", None)
         self._start = int(start) if start is not None else _START_TOKEN_FALLBACK
+        self._join_ids = _encode(self.tokenizer, _JOIN)
         self._max_positions = int(self.model.config.max_position_embeddings)
         backend = torch.version.hip or torch.version.cuda or "unknown"
         self.meta = RunMetadata(
@@ -112,7 +113,7 @@ class Scorer:
         target_ids = _encode(self.tokenizer, target)
         if not target_ids:
             raise ValueError("Target text is empty after tokenization.")
-        empty_prefix = [self._start] + _encode(self.tokenizer, _JOIN)
+        empty_prefix = [self._start] + self._join_ids
         empty_nll = self._score_batch([(empty_prefix, target_ids)])[0]
 
         nlls: list[float] = []
@@ -121,9 +122,7 @@ class Scorer:
             rows: list[tuple[list[int], list[int]]] = []
             for rendered in chunk:
                 prefix = (
-                    [self._start]
-                    + _encode(self.tokenizer, rendered)
-                    + _encode(self.tokenizer, _JOIN)
+                    [self._start] + _encode(self.tokenizer, rendered) + self._join_ids
                 )
                 if len(prefix) + len(target_ids) > self._max_positions:
                     raise ValueError(
