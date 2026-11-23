@@ -38,9 +38,9 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--dtype",
             type=str,
-            default="float32",
+            default="bfloat16",
             choices=("float32", "bfloat16", "float16"),
-            help="model dtype (use bfloat16 for models above ~2B on 24GB cards)",
+            help="model dtype (use float32 for the legacy 0.5B coder pin)",
         )
         p.add_argument(
             "--prefilter",

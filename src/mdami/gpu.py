@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B"
-REVISION = "8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301"
+MODEL_ID = "Qwen/Qwen3-0.6B-Base"
+REVISION = "da87bfb608c14b7cf20ba1ce41287e8de496c0cd"
 _START_TOKEN_FALLBACK = 151643
 _JOIN = "\n\n"
 
@@ -81,7 +81,7 @@ class Scorer:
         batch_size: int = 4,
         model_id: str = MODEL_ID,
         revision: str = REVISION,
-        dtype: str = "float32",
+        dtype: str = "bfloat16",
     ) -> None:
         if not torch.cuda.is_available():
             raise RuntimeError(

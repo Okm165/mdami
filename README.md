@@ -1,7 +1,7 @@
 # mdami
 
 Ranks Markdown source units (sentences, table rows, code lines) by how much they
-help a frozen causal LM — Qwen/Qwen2.5-Coder-0.5B at a pinned revision — predict
+help a frozen causal LM — Qwen/Qwen3-0.6B-Base at a pinned revision — predict
 an existing target text, using the LongCodeZip AMI score.
 
 ## Setup
@@ -68,6 +68,10 @@ Corpus scale: the full `data/ocr` set (418 manuals, 84 MB) parses to
 **1,183,451 atoms**; the 24-manual sample took 19.1 s for 61,636 atoms.
 
 ### Pure-AMI model sweep (same corpus, same 13 links, bf16, batch 32)
+
+The **default pin is Qwen3-0.6B-Base** (revision `da87bfb6…`, bfloat16), the
+measured optimum. The original spec pin remains reproducible with
+`--model Qwen/Qwen2.5-Coder-0.5B --revision 8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301 --dtype float32`.
 
 | model | params | MRR | Hit@3 |
 |---|---|---|---|
