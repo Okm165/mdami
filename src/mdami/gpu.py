@@ -40,6 +40,34 @@ def _encode(tokenizer: Any, text: str) -> list[int]:
     return [int(i) for i in ids]
 
 
+def gather_mean_nll(
+    logits: torch.Tensor, prefix_lengths: torch.Tensor, target_ids: torch.Tensor
+) -> torch.Tensor:
+    """Reduce logits [B, L, V] to per-row mean target NLL.
+
+    All rows share one target. In row i, logit position P[i] - 1 + j predicts
+    target token j (including j = 0); positions are gathered before the
+    unreduced FP32 cross-entropy, then averaged over target tokens per row.
+    """
+    if logits.dim() != 3 or logits.shape[0] != prefix_lengths.numel():
+        raise ValueError(
+            f"Expected logits [B, L, V] with B == {prefix_lengths.numel()}, "
+            f"got {tuple(logits.shape)}"
+        )
+    if logits.shape[0] == 0 or target_ids.numel() == 0:
+        raise ValueError("Empty batch or empty target.")
+    device = logits.device
+    rows = torch.arange(logits.shape[0], device=device)[:, None]
+    offsets = torch.arange(target_ids.numel(), device=device)[None, :]
+    positions = prefix_lengths.to(device)[:, None] - 1 + offsets
+    target_logits = logits[rows, positions].float()  # [B, T, V]
+    labels = target_ids.to(device)[None, :].expand(logits.shape[0], -1)  # [B, T]
+    token_loss = F.cross_entropy(
+        target_logits.transpose(1, 2), labels, reduction="none"
+    )
+    return token_loss.mean(dim=1)  # [B]
+
+
 class Scorer:
     """Frozen causal LM scorer: contexts -> per-candidate mean target NLL.
 
@@ -124,19 +152,12 @@ class Scorer:
             logits = self.model(
                 input_ids=input_ids, attention_mask=attention, use_cache=False
             ).logits
-        target_len = len(rows[0][1])
-        row_idx = torch.arange(len(rows), device=self.device)[:, None]
-        offsets = torch.arange(target_len, device=self.device)[None, :]
-        positions = prefix_lengths.to(self.device)[:, None] - 1 + offsets
-        target_logits = logits[row_idx, positions].float()  # [B, T, V]
-        labels = torch.tensor(
-            [t for _, t in rows], device=self.device, dtype=torch.long
+        mean_nll = gather_mean_nll(
+            logits,
+            prefix_lengths,
+            torch.tensor(rows[0][1], dtype=torch.long),
         )
-        token_loss = F.cross_entropy(
-            target_logits.transpose(1, 2), labels, reduction="none"
-        )
-        mean_nll = token_loss.mean(dim=1)
         return [float(v) for v in mean_nll.cpu()]
 
 
-__all__ = ["MODEL_ID", "REVISION", "RunMetadata", "Scorer"]
+__all__ = ["MODEL_ID", "REVISION", "RunMetadata", "Scorer", "gather_mean_nll"]
