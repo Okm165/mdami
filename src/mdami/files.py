@@ -67,7 +67,7 @@ def atom_to_dict(atom: Atom) -> dict[str, object]:
 
 def rank_row_to_dict(row: RankRow) -> dict[str, object]:
     atom = row.atom
-    out: dict[str, object] = {
+    return {
         "rank": row.rank,
         "atom_id": atom.id,
         "kind": str(atom.kind),
@@ -83,7 +83,3 @@ def rank_row_to_dict(row: RankRow) -> dict[str, object]:
         "ami": row.measurement.ami,
         "bits_per_target_token": row.measurement.bits_per_target_token,
     }
-    if row.scope_nll is not None:
-        out["scope_nll"] = row.scope_nll
-        out["body_bits"] = row.body_bits
-    return out

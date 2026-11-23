@@ -74,34 +74,17 @@ def rank(
     target: Target,
     likelihood: LikelihoodFn,
     count_tokens: TokenCounter,
-    *,
-    scope_control: bool = False,
 ) -> RankResult:
-    """Rank eligible atoms by descending AMI, ties by ascending atom ID.
-
-    With ``scope_control``, also score each candidate's scope-only context
-    (headings/header, no body) and report the additional gain attributable to
-    the body alone: body_bits = (h(scope) - h(rendered)) / ln(2).
-    """
+    """Rank eligible atoms by descending AMI, ties by ascending atom ID."""
     target_atom, target_text = resolve_target(atoms, target)
     eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
     if not eligible:
         raise ValueError("No eligible candidates after exclusions.")
     empty_nll, nlls = likelihood([atom.rendered for atom in eligible], target_text)
     target_tokens = count_tokens(target_text)
-    scope_nlls: Sequence[float] | None = None
-    if scope_control:
-        _, scope_nlls = likelihood(
-            ["\n".join(atom.scope) for atom in eligible], target_text
-        )
     measured = [
-        (atom, from_mean_nll(empty_nll, nll), scope)
-        for atom, nll, scope in zip(
-            eligible,
-            nlls,
-            scope_nlls if scope_nlls is not None else [None] * len(eligible),
-            strict=True,
-        )
+        (atom, from_mean_nll(empty_nll, nll))
+        for atom, nll in zip(eligible, nlls, strict=True)
     ]
     measured.sort(key=lambda item: (-item[1].ami, item[0].id))
     rows = tuple(
@@ -112,9 +95,8 @@ def rank(
             body_tokens=count_tokens(atom.body),
             context_tokens=count_tokens(atom.rendered),
             target_tokens=target_tokens,
-            scope_nll=scope,
         )
-        for i, (atom, measurement, scope) in enumerate(measured, start=1)
+        for i, (atom, measurement) in enumerate(measured, start=1)
     )
     return RankResult(
         rows=rows,
@@ -132,7 +114,6 @@ class EvalReport:
     median_body_tokens: float
     p95_body_tokens: float
     meta: dict[str, object]
-    mrr_by_body: float | None = None  # whole-atom ranking vs body-only ranking
 
 
 def evaluate_links(
@@ -141,7 +122,6 @@ def evaluate_links(
     likelihood: LikelihoodFn,
     count_tokens: TokenCounter,
     meta: dict[str, object] | None = None,
-    scope_control: bool = False,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -155,16 +135,9 @@ def evaluate_links(
 
     per_target: list[dict[str, object]] = []
     ranks: list[int] = []
-    body_ranks: list[int] = []
     distinct_bodies: set[str] = set()
     for target_id, evidence_ids in grouped.items():
-        result = rank(
-            atoms,
-            CorpusTarget(atom_id=target_id),
-            likelihood,
-            count_tokens,
-            scope_control=scope_control,
-        )
+        result = rank(atoms, CorpusTarget(atom_id=target_id), likelihood, count_tokens)
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
         )
@@ -175,29 +148,14 @@ def evaluate_links(
             )
         ranks.append(found)
         distinct_bodies.update(row.atom.body for row in result.rows)
-        entry: dict[str, object] = {
-            "target_id": target_id,
-            "evidence_ids": list(evidence_ids),
-            "rank": found,
-            "pool_size": result.pool_size,
-        }
-        if scope_control:
-            by_body = sorted(
-                (row for row in result.rows if row.body_bits is not None),
-                key=lambda row: (-row.body_bits, row.atom.id),  # type: ignore[operator]
-            )
-            body_rank = next(
-                (
-                    i
-                    for i, row in enumerate(by_body, start=1)
-                    if row.atom.id in evidence_ids
-                ),
-                None,
-            )
-            assert body_rank is not None
-            body_ranks.append(body_rank)
-            entry["rank_by_body"] = body_rank
-        per_target.append(entry)
+        per_target.append(
+            {
+                "target_id": target_id,
+                "evidence_ids": list(evidence_ids),
+                "rank": found,
+                "pool_size": result.pool_size,
+            }
+        )
 
     lengths = sorted(count_tokens(body) for body in distinct_bodies)
     return EvalReport(
@@ -208,5 +166,4 @@ def evaluate_links(
         median_body_tokens=percentile(lengths, 0.5),
         p95_body_tokens=percentile(lengths, 0.95),
         meta=meta or {},
-        mrr_by_body=mean_reciprocal_rank(body_ranks) if scope_control else None,
     )

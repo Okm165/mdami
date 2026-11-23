@@ -1,6 +1,5 @@
 """Immutable domain records. Torch-free and free of I/O."""
 
-import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType
@@ -76,15 +75,6 @@ class RankRow:
     body_tokens: int
     context_tokens: int
     target_tokens: int
-    scope_nll: float | None = None  # heading/header-only NLL when control is on
-
-    @property
-    def body_bits(self) -> float | None:
-        """Additional bits/token gained by the body beyond its scope."""
-        if self.scope_nll is None:
-            return None
-        conditional = math.log(self.measurement.ppl_with_atom)
-        return (self.scope_nll - conditional) / math.log(2)
 
 
 @dataclass(frozen=True, slots=True)
