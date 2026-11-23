@@ -67,6 +67,30 @@ the earlier length bias does not come from scope credit.
 Corpus scale: the full `data/ocr` set (418 manuals, 84 MB) parses to
 **1,183,451 atoms**; the 24-manual sample took 19.1 s for 61,636 atoms.
 
+### Pure-AMI model sweep (same corpus, same 13 links, bf16, batch 32)
+
+| model | params | MRR | Hit@3 |
+|---|---|---|---|
+| Qwen2.5-Coder-0.5B (FP32 baseline) | 0.49B | 0.065 | 0.077 |
+| **Qwen3-0.6B-Base** | 0.6B | **0.169** | **0.154** |
+| Qwen2.5-Coder-1.5B | 1.5B | 0.091 | 0.077 |
+| Qwen2.5-Coder-3B | 3B | 0.022 | 0.000 |
+| Qwen3-8B | 8B | 0.026 | — |
+
+Raw reports: `qwen3-06b_eval.json`, `qwen25-15b_eval.json`, `qwen25-3b_eval.json`,
+`report_qwen3_8b.json` in this directory. The retrieval-optimal point is the
+smallest model with the newest architecture: Qwen3-0.6B-Base improves MRR 2.6×
+over the 0.5B coder, while every larger model degrades monotonically — stronger
+models compress everything, shrinking the perplexity gap between relevant and
+irrelevant context. To reproduce:
+
+```sh
+uv run --locked mdami eval data/experiments/sam3x8e-tc \
+    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \
+    --model /path/to/qwen3-06b --revision local --dtype bfloat16
+```
+
+
 ## Layout
 
 `src/mdami/records.py` domain records · `markdown.py` parser · `gpu.py` scoring
