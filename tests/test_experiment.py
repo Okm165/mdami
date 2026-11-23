@@ -123,3 +123,42 @@ def test_eval_rejects_unknown_and_excluded_references() -> None:
         evaluate_links(
             CORPUS, [("timer.md@9.1", "timer.md@12.1")], fake_likelihood, count_tokens
         )
+
+
+def test_scope_control_reports_body_only_gain() -> None:
+    def control_likelihood(contexts, target):
+        empty, nlls = fake_likelihood(contexts, target)
+        # Scope-only context: pretend the scope alone gives a mid NLL for all.
+        del contexts, target
+        return empty, [2.6 for _ in nlls]
+
+    result = rank(
+        CORPUS,
+        CorpusTarget(_by_id()["timer.md@9.1"].id),
+        control_likelihood,
+        count_tokens,
+        scope_control=True,
+    )
+    for row in result.rows:
+        assert row.scope_nll == 2.6
+        assert row.body_bits is not None
+    # Without the flag no control fields are emitted.
+    plain = rank(
+        CORPUS,
+        CorpusTarget(_by_id()["timer.md@9.1"].id),
+        control_likelihood,
+        count_tokens,
+    )
+    assert all(row.scope_nll is None and row.body_bits is None for row in plain.rows)
+
+
+def test_eval_body_ranking_metric() -> None:
+    report = evaluate_links(
+        CORPUS,
+        [("timer.md@9.1", "timer.md@5.1")],
+        fake_likelihood,
+        count_tokens,
+        scope_control=True,
+    )
+    assert report.mrr_by_body is not None
+    assert report.targets[0]["rank_by_body"] == 1

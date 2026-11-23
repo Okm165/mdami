@@ -29,6 +29,11 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--batch-size", type=int, default=4, help="candidates per forward pass"
         )
+        p.add_argument(
+            "--scope-control",
+            action="store_true",
+            help="also score heading/header-only contexts and report body-only gain",
+        )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
     _add_scoring_args(p_rank)
@@ -69,7 +74,13 @@ def _cmd_rank(args: argparse.Namespace) -> int:
         else TextTarget(text=args.text)
     )
     try:
-        result = experiment.rank(atoms, target, scorer.score, scorer.token_count)
+        result = experiment.rank(
+            atoms,
+            target,
+            scorer.score,
+            scorer.token_count,
+            scope_control=args.scope_control,
+        )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -93,6 +104,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             scorer.score,
             scorer.token_count,
             meta={"run_metadata": scorer.meta.log_line()},
+            scope_control=args.scope_control,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

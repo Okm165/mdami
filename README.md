@@ -57,6 +57,16 @@ score higher AMI (≈168) than the one-line definition row (≈125), so AMI rewa
 length and lexical co-mention over definitional specificity. Fixture results
 above are separate and trivial (2-candidate pool).
 
+Heading-only control (`--scope-control`, same run conditions, see
+`report_scope_control.json`): ranking by body-only gain (h(scope) − h(rendered))
+is **worse**, MRR 0.047 vs 0.065. The heading/header scope carries real signal —
+CPCDIS 8→28, CPCTRG 10→29, BURST 52→101, CLKEN 47→189 under body-only ranking,
+while LDBDIS 6→5 and TCCLKS 96→75 improve. Conclusion: keep whole-atom scoring;
+the earlier length bias does not come from scope credit.
+
+Corpus scale: the full `data/ocr` set (418 manuals, 84 MB) parses to
+**1,183,451 atoms**; the 24-manual sample took 19.1 s for 61,636 atoms.
+
 ## Layout
 
 `src/mdami/records.py` domain records · `markdown.py` parser · `gpu.py` scoring
