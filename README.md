@@ -91,16 +91,18 @@ irrelevant context. To reproduce:
 
 ### Scoring direction (Qwen3-0.6B-Base, bf16, batch 32)
 
-| direction | metric ranked | MRR | Hit@3 |
-|---|---|---|---|
-| **reverse h(atom \| target), gain g = h(∅) − h(c)** | bits per body token | **0.206** | **0.231** |
-| forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)} | PPL difference | 0.169 | 0.154 |
+| direction | metric ranked | best use | MRR | Hit@3 |
+|---|---|---|---|---|
+| **reverse h(atom \| target), gain g = h(∅) − h(c)** | bits per body token | corpus targets (`eval` default) | **0.206** | **0.231** |
+| forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)} | PPL difference | literal queries (`rank` default) | 0.169 | 0.154 |
 
 Both are pure likelihood quantities — no heuristics. In the reverse direction
 h(∅) varies per candidate, so the exp-difference AMI mixes in each body's
 a-priori perplexity (MRR 0.019); ranking by the per-token gain instead is the
-pure compression improvement and the measured optimum. Default is
-`--direction reverse`; `--direction forward` reproduces the original AMI runs.
+pure compression improvement and the measured optimum for corpus targets.
+Literal short queries measure better in the forward direction (the Cortex-M3
+statement target ranks #1 forward, #2 reverse), so `rank` defaults to forward
+and `eval` to reverse; override with `--direction`.
 Raw reports: `report_reverse_default.json`, and the sweep JSONs above.
 
 ```sh

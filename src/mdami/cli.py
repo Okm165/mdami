@@ -52,9 +52,10 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--direction",
             choices=("reverse", "forward"),
-            default="reverse",
-            help="AMI direction: reverse scores h(atom | target) (measured "
-            "stronger), forward scores h(target | atom)",
+            default="forward",
+            help="AMI direction: forward scores h(target | atom) (best for "
+            "literal queries), reverse scores h(atom | target) gain "
+            "(best for corpus-target benchmarks; eval default)",
         )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
@@ -65,6 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_eval = sub.add_parser("eval", help="evaluate annotated evidence links")
     _add_scoring_args(p_eval)
+    p_eval.set_defaults(direction="reverse")
     p_eval.add_argument("--links", type=str, required=True, help="TSV of links")
     return parser
 
