@@ -77,6 +77,7 @@ measured optimum. The original spec pin remains reproducible with
 |---|---|---|---|
 | Qwen2.5-Coder-0.5B (FP32 baseline) | 0.49B | 0.065 | 0.077 |
 | **Qwen3-0.6B-Base** | 0.6B | **0.169** | **0.154** |
+| Qwen3.5-0.8B-Base (newest arch, Gated DeltaNet) | 0.8B | 0.141 | 0.154 |
 | Qwen2.5-Coder-1.5B | 1.5B | 0.091 | 0.077 |
 | Qwen2.5-Coder-3B | 3B | 0.022 | 0.000 |
 | Qwen3-8B | 8B | 0.026 | — |
