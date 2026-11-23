@@ -1,0 +1,53 @@
+[project]
+name = "mdami"
+version = "0.1.0"
+description = "Rank Markdown source units by how much they help a frozen causal LM predict an existing target text."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch==2.13.0+rocm7.2",
+    "triton-rocm>=3.7.1,<3.8; sys_platform == 'linux'",
+    "transformers>=4.51",
+    "markdown-it-py>=3.0",
+    "pysbd>=0.3.4",
+]
+
+[project.scripts]
+mdami = "mdami.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-rocm" }
+triton-rocm = { index = "pytorch-rocm" }
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.2"
+explicit = true
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.workspace]
+members = []
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["pysbd.*", "transformers.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+markers = ["gpu: requires a visible GPU and downloads the pinned model"]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"

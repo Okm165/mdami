@@ -1,0 +1,125 @@
+"""Ranking behavior with a substitute likelihood function (no GPU)."""
+
+import pytest
+
+from mdami.experiment import evaluate_links, rank
+from mdami.markdown import parse_document
+from mdami.records import CorpusTarget, TextTarget
+
+DOC = """# Timer
+## Flags
+| Bit | Name | Meaning |
+| --- | --- | --- |
+| 3 | OVF | Counter wrapped. |
+| 2 | RDY | Data ready. |
+
+## Operation
+Firmware clears OVF after a counter wrap.
+
+## Copy
+Firmware clears OVF after a counter wrap.
+"""
+
+LENS = {
+    "timer.md@5.1": "Timer\nFlags\nBit\nName\nMeaning\n| 3 | OVF | Counter wrapped. |",
+    "timer.md@6.1": "Timer\nFlags\nBit\nName\nMeaning\n| 2 | RDY | Data ready. |",
+    "timer.md@9.1": "Firmware clears OVF after a counter wrap.",
+    "timer.md@12.1": "Firmware clears OVF after a counter wrap.",
+}
+CORPUS = parse_document("timer.md", DOC)[0]
+
+
+def fake_likelihood(contexts, target):
+    """Hand-ordered NLLs: OVF row best, copy penalty, RDY row worst."""
+    empty = 3.0
+    table = {
+        "Timer\nFlags\nBit\nName\nMeaning\n| 3 | OVF | Counter wrapped. |": 1.0,
+        "Timer\nFlags\nBit\nName\nMeaning\n| 2 | RDY | Data ready. |": 3.5,
+        "Firmware clears OVF after a counter wrap.": 2.0,
+    }
+    return empty, [table.get(c, 2.5) for c in contexts]
+
+
+def count_tokens(text: str) -> int:
+    return len(text.split())
+
+
+def _by_id():
+    return {atom.id: atom for atom in CORPUS}
+
+
+def test_target_resolves_to_body_and_excludes_leaf_and_copies() -> None:
+    result = rank(
+        CORPUS, CorpusTarget(_by_id()["timer.md@9.1"].id), fake_likelihood, count_tokens
+    )
+    ids = [row.atom.id for row in result.rows]
+    # The target's own leaf and the verbatim copy leaf are both excluded.
+    assert "timer.md@9.1" not in ids
+    assert "timer.md@12.1" not in ids
+    assert result.excluded_same_leaf == 1
+    assert result.excluded_copy == 1
+    assert result.pool_size == 2
+
+
+def test_ranks_descend_by_ami_with_atom_id_ties() -> None:
+    result = rank(
+        CORPUS, CorpusTarget(_by_id()["timer.md@9.1"].id), fake_likelihood, count_tokens
+    )
+    amis = [row.measurement.ami for row in result.rows]
+    assert amis == sorted(amis, reverse=True)
+    top = result.rows[0]
+    assert top.atom.id == "timer.md@5.1"
+    assert top.rank == 1
+    import math
+
+    assert top.measurement.ppl_empty == pytest.approx(math.exp(3.0))
+    assert top.measurement.ppl_with_atom == pytest.approx(math.exp(1.0))
+    assert top.target_tokens == count_tokens(
+        "Firmware clears OVF after a counter wrap."
+    )
+    assert top.context_tokens == count_tokens(top.atom.rendered)
+
+
+def test_literal_target_uses_full_pool() -> None:
+    result = rank(
+        CORPUS, TextTarget(text="timer overflow flag"), fake_likelihood, count_tokens
+    )
+    assert result.pool_size == 4
+    assert result.excluded_same_leaf == 0 and result.excluded_copy == 0
+
+
+def test_empty_target_rejected_and_unknown_id_rejected() -> None:
+    with pytest.raises(ValueError, match="Empty target"):
+        rank(CORPUS, TextTarget(text="   "), fake_likelihood, count_tokens)
+    with pytest.raises(ValueError, match="Unknown target"):
+        from mdami.records import AtomId
+
+        rank(
+            CORPUS, CorpusTarget(AtomId("timer.md@9.9")), fake_likelihood, count_tokens
+        )
+
+
+def test_eval_report_on_known_link() -> None:
+    report = evaluate_links(
+        CORPUS,
+        [("timer.md@9.1", "timer.md@5.1")],
+        fake_likelihood,
+        count_tokens,
+        meta={"backend": "test"},
+    )
+    assert report.num_targets == 1
+    assert report.targets[0]["rank"] == 1
+    assert report.targets[0]["pool_size"] == 2
+    assert report.mrr == 1.0 and report.hit_at_3 == 1.0
+    assert report.meta == {"backend": "test"}
+
+
+def test_eval_rejects_unknown_and_excluded_references() -> None:
+    with pytest.raises(ValueError, match="Unknown target_id"):
+        evaluate_links(
+            CORPUS, [("timer.md@1.1", "timer.md@5.1")], fake_likelihood, count_tokens
+        )
+    with pytest.raises(ValueError, match="excluded or absent"):
+        evaluate_links(
+            CORPUS, [("timer.md@9.1", "timer.md@12.1")], fake_likelihood, count_tokens
+        )
