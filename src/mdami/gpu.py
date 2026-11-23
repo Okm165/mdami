@@ -19,6 +19,7 @@ _JOIN = "\n\n"
 
 @dataclass(frozen=True, slots=True)
 class RunMetadata:
+    model_id: str
     model_revision: str
     torch_version: str
     hip_or_cuda: str
@@ -28,7 +29,7 @@ class RunMetadata:
 
     def log_line(self) -> str:
         return (
-            f"model={MODEL_ID}@{self.model_revision} torch={self.torch_version} "
+            f"model={self.model_id}@{self.model_revision} torch={self.torch_version} "
             f"backend={self.hip_or_cuda} dtype={self.dtype} "
             f"device={self.device_name} batch_size={self.batch_size}"
         )
@@ -75,17 +76,25 @@ class Scorer:
     matching the typed likelihood interface used by ranking.
     """
 
-    def __init__(self, batch_size: int = 4) -> None:
+    def __init__(
+        self,
+        batch_size: int = 4,
+        model_id: str = MODEL_ID,
+        revision: str = REVISION,
+        dtype: str = "float32",
+    ) -> None:
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "Scoring requires a GPU: torch.cuda.is_available() is False. "
                 "The atoms command works without one."
             )
         self.batch_size = batch_size
+        self.model_id = model_id
         self.device = torch.device("cuda")
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION)
+        torch_dtype = getattr(torch, dtype)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
         model: Any = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID, revision=REVISION, dtype=torch.float32
+            model_id, revision=revision, dtype=torch_dtype
         )
         self.model = model.to(self.device)
         self.model.eval()
@@ -95,10 +104,11 @@ class Scorer:
         self._max_positions = int(self.model.config.max_position_embeddings)
         backend = torch.version.hip or torch.version.cuda or "unknown"
         self.meta = RunMetadata(
-            model_revision=REVISION,
+            model_id=model_id,
+            model_revision=revision,
             torch_version=torch.__version__,
             hip_or_cuda=f"HIP {backend}" if torch.version.hip else f"CUDA {backend}",
-            dtype="float32",
+            dtype=dtype,
             device_name=torch.cuda.get_device_name(self.device),
             batch_size=batch_size,
         )

@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import experiment, files
-from .gpu import Scorer
+from .gpu import MODEL_ID, REVISION, Scorer
 from .records import CorpusTarget, TextTarget
 
 
@@ -28,6 +28,19 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("root", type=str, help="directory containing *.md files")
         p.add_argument(
             "--batch-size", type=int, default=4, help="candidates per forward pass"
+        )
+        p.add_argument(
+            "--model", type=str, default=MODEL_ID, help="HF model id to score with"
+        )
+        p.add_argument(
+            "--revision", type=str, default=REVISION, help="HF revision/commit"
+        )
+        p.add_argument(
+            "--dtype",
+            type=str,
+            default="float32",
+            choices=("float32", "bfloat16", "float16"),
+            help="model dtype (use bfloat16 for models above ~2B on 24GB cards)",
         )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
@@ -54,15 +67,20 @@ def _cmd_atoms(args: argparse.Namespace) -> int:
     return 0
 
 
-def _make_scorer(batch_size: int) -> Scorer:
-    scorer = Scorer(batch_size=batch_size)
+def _make_scorer(args: argparse.Namespace) -> Scorer:
+    scorer = Scorer(
+        batch_size=args.batch_size,
+        model_id=args.model,
+        revision=args.revision,
+        dtype=args.dtype,
+    )
     print(scorer.meta.log_line(), file=sys.stderr)
     return scorer
 
 
 def _cmd_rank(args: argparse.Namespace) -> int:
     atoms, _ = files.load_corpus(Path(args.root))
-    scorer = _make_scorer(args.batch_size)
+    scorer = _make_scorer(args)
     target = (
         CorpusTarget(atom_id=args.target_id)
         if args.target_id is not None
@@ -85,7 +103,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
 def _cmd_eval(args: argparse.Namespace) -> int:
     atoms, _ = files.load_corpus(Path(args.root))
     links = files.read_links(Path(args.links))
-    scorer = _make_scorer(args.batch_size)
+    scorer = _make_scorer(args)
     try:
         report = experiment.evaluate_links(
             atoms,
