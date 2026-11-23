@@ -89,6 +89,20 @@ over the 0.5B coder, while every larger model degrades monotonically — stronge
 models compress everything, shrinking the perplexity gap between relevant and
 irrelevant context. To reproduce:
 
+### Scoring direction (Qwen3-0.6B-Base, bf16, batch 32)
+
+| direction | metric ranked | MRR | Hit@3 |
+|---|---|---|---|
+| **reverse h(atom \| target), gain g = h(∅) − h(c)** | bits per body token | **0.206** | **0.231** |
+| forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)} | PPL difference | 0.169 | 0.154 |
+
+Both are pure likelihood quantities — no heuristics. In the reverse direction
+h(∅) varies per candidate, so the exp-difference AMI mixes in each body's
+a-priori perplexity (MRR 0.019); ranking by the per-token gain instead is the
+pure compression improvement and the measured optimum. Default is
+`--direction reverse`; `--direction forward` reproduces the original AMI runs.
+Raw reports: `report_reverse_default.json`, and the sweep JSONs above.
+
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \
     --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \

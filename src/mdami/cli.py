@@ -49,6 +49,13 @@ def _build_parser() -> argparse.ArgumentParser:
             help="literal targets only: BM25-select this many candidates before "
             "AMI ranking (0 = score the full corpus)",
         )
+        p.add_argument(
+            "--direction",
+            choices=("reverse", "forward"),
+            default="reverse",
+            help="AMI direction: reverse scores h(atom | target) (measured "
+            "stronger), forward scores h(target | atom)",
+        )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
     _add_scoring_args(p_rank)
@@ -95,7 +102,13 @@ def _cmd_rank(args: argparse.Namespace) -> int:
     )
     try:
         result = experiment.rank(
-            atoms, target, scorer.score, scorer.token_count, prefilter=args.prefilter
+            atoms,
+            target,
+            scorer.score,
+            scorer.token_count,
+            prefilter=args.prefilter,
+            direction=args.direction,
+            reverse_likelihood=scorer.sequence_nll,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -120,6 +133,8 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             scorer.score,
             scorer.token_count,
             meta={"run_metadata": scorer.meta.log_line()},
+            direction=args.direction,
+            reverse_likelihood=scorer.sequence_nll,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

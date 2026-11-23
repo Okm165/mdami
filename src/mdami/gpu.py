@@ -144,6 +144,66 @@ class Scorer:
             nlls.extend(self._score_batch(rows))
         return empty_nll, tuple(nlls)
 
+    def sequence_nll(
+        self, context: str, bodies: Sequence[str]
+    ) -> tuple[list[float], list[float]]:
+        """Per-body (empty-prefix mean NLL, mean NLL given context), nats.
+
+        Ragged targets: row i is ``[start] + E(context) + E("\\n\\n") +
+        E(bodies[i])``; the empty row uses the framing-only prefix. This is
+        the reverse-direction likelihood: how well the candidate's own body
+        is predicted given the context.
+        """
+        if not bodies:
+            raise ValueError("No candidate bodies.")
+        join_ids = self._join_ids
+        context_prefix = [self._start] + _encode(self.tokenizer, context) + join_ids
+        empty_prefix = [self._start] + join_ids
+        encoded = [_encode(self.tokenizer, body) for body in bodies]
+        if not all(encoded):
+            raise ValueError("Candidate body is empty after tokenization.")
+        for body in encoded:
+            if len(context_prefix) + len(body) > self._max_positions:
+                raise ValueError(
+                    f"Input pair exceeds model context "
+                    f"({len(context_prefix) + len(body)} > "
+                    f"{self._max_positions} tokens)."
+                )
+        empty_nlls = self._score_ragged([empty_prefix] * len(encoded), encoded)
+        cond_nlls = self._score_ragged([context_prefix] * len(encoded), encoded)
+        return empty_nlls, cond_nlls
+
+    def _score_ragged(
+        self, prefixes: list[list[int]], bodies: list[list[int]]
+    ) -> list[float]:
+        """Right-padded forward passes with per-row targets; per-row mean NLL."""
+        results: list[float] = []
+        for chunk_start in range(0, len(prefixes), self.batch_size):
+            chunk_p = prefixes[chunk_start : chunk_start + self.batch_size]
+            chunk_b = bodies[chunk_start : chunk_start + self.batch_size]
+            seqs = [p + b for p, b in zip(chunk_p, chunk_b, strict=True)]
+            plens = [len(p) for p in chunk_p]
+            max_len = max(len(seq) for seq in seqs)
+            input_ids = torch.zeros(len(seqs), max_len, dtype=torch.long)
+            attention = torch.zeros(len(seqs), max_len, dtype=torch.long)
+            for i, seq in enumerate(seqs):
+                input_ids[i, : len(seq)] = torch.tensor(seq)
+                attention[i, : len(seq)] = 1
+            input_ids, attention = input_ids.to(self.device), attention.to(self.device)
+            with torch.inference_mode():
+                logits = self.model(
+                    input_ids=input_ids, attention_mask=attention, use_cache=False
+                ).logits
+            for i, (plen, body) in enumerate(zip(plens, chunk_b, strict=True)):
+                positions = torch.arange(
+                    plen - 1, plen - 1 + len(body), device=logits.device
+                )
+                target_logits = logits[i, positions].float()  # [T, V]
+                labels = torch.tensor(body, device=logits.device)
+                loss = F.cross_entropy(target_logits, labels, reduction="none")
+                results.append(float(loss.mean()))
+        return results
+
     def _score_batch(self, rows: list[tuple[list[int], list[int]]]) -> list[float]:
         """One right-padded forward pass; logit position P[i]-1+j predicts t[j]."""
         max_len = max(len(prefix) + len(target) for prefix, target in rows)

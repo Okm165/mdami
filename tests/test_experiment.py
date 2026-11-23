@@ -44,6 +44,45 @@ def count_tokens(text: str) -> int:
     return len(text.split())
 
 
+def fake_reverse_likelihood(context, bodies):
+    """Reverse direction: NLL of each atom body given the context."""
+
+    def nll(body: str) -> float:
+        if "OVF" in body and "Counter wrapped" in body:
+            return 0.5
+        return 2.0
+
+    empties = [1.0] * len(bodies)
+    return empties, [nll(b) for b in bodies]
+
+
+def test_reverse_direction_ranks_by_body_ami() -> None:
+    result = rank(
+        CORPUS,
+        CorpusTarget(_by_id()["timer.md@9.1"].id),
+        fake_likelihood,
+        count_tokens,
+        direction="reverse",
+        reverse_likelihood=fake_reverse_likelihood,
+    )
+    ids = [row.atom.id for row in result.rows]
+    # OVF row body has the lowest conditional NLL, so it ranks first.
+    assert ids[0] == "timer.md@5.1"
+    # Reverse direction: context tokens count is the target's, not the atom's.
+    assert result.rows[0].context_tokens == count_tokens(_by_id()["timer.md@9.1"].body)
+
+
+def test_reverse_direction_requires_likelihood() -> None:
+    with pytest.raises(ValueError, match="reverse"):
+        rank(
+            CORPUS,
+            CorpusTarget(_by_id()["timer.md@9.1"].id),
+            fake_likelihood,
+            count_tokens,
+            direction="reverse",
+        )
+
+
 def _by_id():
     return {atom.id: atom for atom in CORPUS}
 

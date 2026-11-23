@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from .metrics import from_mean_nll, hit_at_k, mean_reciprocal_rank, percentile
 from .records import (
@@ -15,7 +16,13 @@ from .records import (
 
 # (contexts, target) -> (empty-prefix mean NLL, per-context mean NLL)
 LikelihoodFn = Callable[[Sequence[str], str], tuple[float, Sequence[float]]]
+# (context, bodies) -> (per-body empty-prefix mean NLL, per-body conditional
+# mean NLL given the context); ragged targets, one row per body.
+ReverseLikelihoodFn = Callable[
+    [str, Sequence[str]], tuple[Sequence[float], Sequence[float]]
+]
 TokenCounter = Callable[[str], int]
+Direction = Literal["forward", "reverse"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +123,16 @@ def rank(
     likelihood: LikelihoodFn,
     count_tokens: TokenCounter,
     prefilter: int = 0,
+    direction: Direction = "forward",
+    reverse_likelihood: ReverseLikelihoodFn | None = None,
 ) -> RankResult:
     """Rank eligible atoms by descending AMI, ties by ascending atom ID.
 
-    With ``prefilter`` > 0 and a literal target, first select that many
-    candidates by BM25 lexical score, then AMI-rank only those.
+    ``direction="forward"`` scores h(target | atom) with ``likelihood``;
+    ``direction="reverse"`` scores h(atom | target) with
+    ``reverse_likelihood`` — the measured-stronger direction on real
+    manuals. With ``prefilter`` > 0 and a literal target, first select that
+    many candidates by BM25 lexical score, then AMI-rank only those.
     """
     target_atom, target_text = resolve_target(atoms, target)
     eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
@@ -128,20 +140,40 @@ def rank(
         eligible = bm25_top(eligible, target_text, prefilter)
     if not eligible:
         raise ValueError("No eligible candidates after exclusions.")
-    empty_nll, nlls = likelihood([atom.rendered for atom in eligible], target_text)
     target_tokens = count_tokens(target_text)
-    measured = [
-        (atom, from_mean_nll(empty_nll, nll))
-        for atom, nll in zip(eligible, nlls, strict=True)
-    ]
-    measured.sort(key=lambda item: (-item[1].ami, item[0].id))
+    if direction == "forward":
+        empty_nll, nlls = likelihood([atom.rendered for atom in eligible], target_text)
+        measured = [
+            (atom, from_mean_nll(empty_nll, nll))
+            for atom, nll in zip(eligible, nlls, strict=True)
+        ]
+        context_tokens = [count_tokens(atom.rendered) for atom in eligible]
+        # Forward: shared empty prefix, AMI order == gain order.
+        measured.sort(key=lambda item: (-item[1].ami, item[0].id))
+    else:
+        if reverse_likelihood is None:
+            raise ValueError("direction='reverse' requires reverse_likelihood.")
+        empties, conds = reverse_likelihood(
+            target_text, [atom.body for atom in eligible]
+        )
+        measured = [
+            (atom, from_mean_nll(empty, cond))
+            for atom, empty, cond in zip(eligible, empties, conds, strict=True)
+        ]
+        context_tokens = [target_tokens] * len(eligible)
+        # Reverse: h(empty) varies per candidate body, so the exp-difference
+        # AMI mixes in the body's a-priori perplexity. Rank by the per-token
+        # gain g = h(empty) - h(cond) (bits per body token) — the pure
+        # compression improvement, measured stronger.
+        measured.sort(key=lambda item: (-item[1].bits_per_target_token, item[0].id))
+    ctx_by_atom = dict(zip((a.id for a, _ in measured), context_tokens, strict=True))
     rows = tuple(
         RankRow(
             rank=i,
             atom=atom,
             measurement=measurement,
             body_tokens=count_tokens(atom.body),
-            context_tokens=count_tokens(atom.rendered),
+            context_tokens=ctx_by_atom[atom.id],
             target_tokens=target_tokens,
         )
         for i, (atom, measurement) in enumerate(measured, start=1)
@@ -170,6 +202,8 @@ def evaluate_links(
     likelihood: LikelihoodFn,
     count_tokens: TokenCounter,
     meta: dict[str, object] | None = None,
+    direction: Direction = "forward",
+    reverse_likelihood: ReverseLikelihoodFn | None = None,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -185,7 +219,14 @@ def evaluate_links(
     ranks: list[int] = []
     distinct_bodies: set[str] = set()
     for target_id, evidence_ids in grouped.items():
-        result = rank(atoms, CorpusTarget(atom_id=target_id), likelihood, count_tokens)
+        result = rank(
+            atoms,
+            CorpusTarget(atom_id=target_id),
+            likelihood,
+            count_tokens,
+            direction=direction,
+            reverse_likelihood=reverse_likelihood,
+        )
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
         )

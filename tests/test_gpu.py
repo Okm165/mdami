@@ -62,6 +62,15 @@ def test_identical_context_equals_empty_prefix_within_tolerance(scorer: Scorer) 
     assert nlls[0] == pytest.approx(empty, abs=1e-4)
 
 
+def test_sequence_nll_matches_single_row_scoring(scorer: Scorer) -> None:
+    tolerance = 1e-2 if scorer.meta.dtype == "bfloat16" else 1e-4
+    for context in CONTEXTS:
+        empties, conds = scorer.sequence_nll(context, [TARGET])
+        ref_empty, ref_conds = scorer.score([context], TARGET)
+        assert empties[0] == pytest.approx(ref_empty, rel=2e-2, abs=tolerance)
+        assert conds[0] == pytest.approx(ref_conds[0], rel=2e-2, abs=tolerance)
+
+
 def test_empty_target_and_oversize_context_rejected(scorer: Scorer) -> None:
     with pytest.raises(ValueError, match="empty"):
         scorer.score(["ctx"], "")
