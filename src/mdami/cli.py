@@ -42,6 +42,13 @@ def _build_parser() -> argparse.ArgumentParser:
             choices=("float32", "bfloat16", "float16"),
             help="model dtype (use bfloat16 for models above ~2B on 24GB cards)",
         )
+        p.add_argument(
+            "--prefilter",
+            type=int,
+            default=0,
+            help="literal targets only: BM25-select this many candidates before "
+            "AMI ranking (0 = score the full corpus)",
+        )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
     _add_scoring_args(p_rank)
@@ -87,7 +94,9 @@ def _cmd_rank(args: argparse.Namespace) -> int:
         else TextTarget(text=args.text)
     )
     try:
-        result = experiment.rank(atoms, target, scorer.score, scorer.token_count)
+        result = experiment.rank(
+            atoms, target, scorer.score, scorer.token_count, prefilter=args.prefilter
+        )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

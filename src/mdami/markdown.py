@@ -126,7 +126,5 @@ def parse_document(path: str, text: str) -> tuple[tuple[Atom, ...], int]:
     return tuple(atoms), unsupported
 
 
-def parse_markdown(
-    path: PurePosixPath | str, text: str
-) -> tuple[Atom, ...]:
+def parse_markdown(path: PurePosixPath | str, text: str) -> tuple[Atom, ...]:
     return parse_document(str(path), text)[0]
