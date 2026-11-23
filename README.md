@@ -57,8 +57,8 @@ score higher AMI (≈168) than the one-line definition row (≈125), so AMI rewa
 length and lexical co-mention over definitional specificity. Fixture results
 above are separate and trivial (2-candidate pool).
 
-Heading-only control (`--scope-control`, same run conditions, see
-`report_scope_control.json`): ranking by body-only gain (h(scope) − h(rendered))
+Heading-only control (run once with a since-removed flag; same run conditions,
+see `report_scope_control.json`): ranking by body-only gain (h(scope) − h(rendered))
 is **worse**, MRR 0.047 vs 0.065. The heading/header scope carries real signal —
 CPCDIS 8→28, CPCTRG 10→29, BURST 52→101, CLKEN 47→189 under body-only ranking,
 while LDBDIS 6→5 and TCCLKS 96→75 improve. Conclusion: keep whole-atom scoring;
