@@ -37,6 +37,26 @@ uv run --locked mypy --strict src/mdami
 uv run --locked pytest                 # add -m gpu to include the real-GPU test
 ```
 
+## Real-manual experiment (SAM3X8E, Timer Counter chapter)
+
+`data/experiments/sam3x8e-tc/` holds a real OCR slice (chapter 36 of
+`Microchip_Technology__SAM3X8ERT__1389537.pdf.md`) and 13 pre-annotated
+procedure→definition links (`links.tsv`, marked before scoring):
+
+```sh
+uv run --locked mdami eval data/experiments/sam3x8e-tc \
+    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32
+```
+
+Observed on 2026-11-23 (Qwen2.5-Coder-0.5B, FP32, ROCm 7.2, batch 32, 978 atoms):
+MRR **0.065**, Hit@3 **0.077**, 13 targets, median body 45.5 tokens, p95 171.6.
+Best: ETRGEDG definition rank 3/973, CPCTRG rank 10/958, LDBDIS 6, CPCDIS 8.
+Worst: WAVE definition rank 181 and 227, SWTRG 206, TCCLKS 96. The failure mode
+is visible in the raw rankings: long paragraphs that merely co-mention `WAVE`
+score higher AMI (≈168) than the one-line definition row (≈125), so AMI rewards
+length and lexical co-mention over definitional specificity. Fixture results
+above are separate and trivial (2-candidate pool).
+
 ## Layout
 
 `src/mdami/records.py` domain records · `markdown.py` parser · `gpu.py` scoring
