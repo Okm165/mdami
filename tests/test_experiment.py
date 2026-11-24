@@ -217,27 +217,3 @@ def test_eval_rejects_unknown_and_excluded_references() -> None:
         evaluate_links(
             CORPUS, [("timer.md@9.1", "timer.md@12.1")], fake_likelihood, count_tokens
         )
-
-
-def test_bm25_prefilter_selects_lexically_relevant_candidates() -> None:
-    from mdami.experiment import bm25_top
-
-    top = bm25_top(CORPUS, "OVF counter wrap", 2)
-    # The verbatim copy and the sentence mentioning the OVF wrap outrank the
-    # RDY row: their bodies carry the query terms at high density.
-    ids = [a.id for a in top]
-    assert "timer.md@12.1" in ids and "timer.md@9.1" in ids
-    assert "timer.md@6.1" not in ids
-    # Prefiltered ranking scores only the selected pool.
-    result = rank(
-        CORPUS,
-        TextTarget(text="OVF counter wrap"),
-        fake_likelihood,
-        count_tokens,
-        prefilter=2,
-    )
-    assert result.pool_size == 2
-    assert [row.atom.id for row in result.rows] == [
-        "timer.md@12.1",
-        "timer.md@9.1",
-    ]  # equal NLLs tie-break by ascending atom ID

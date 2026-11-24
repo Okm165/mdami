@@ -1,6 +1,5 @@
 """Target resolution, eligibility, ranking and evidence-link evaluation."""
 
-import math
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -116,7 +115,6 @@ def rank(
     target: Target,
     likelihood: LikelihoodFn,
     count_tokens: TokenCounter,
-    prefilter: int = 0,
     direction: Direction = "forward",
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
@@ -127,17 +125,13 @@ def rank(
     ``direction="forward"`` scores h(target | atom) with ``likelihood``;
     ``direction="reverse"`` scores h(atom | target) with
     ``reverse_likelihood``; ``direction="rrf"`` fuses both orderings by
-    reciprocal-rank fusion. With ``prefilter`` > 0 and a literal target,
-    first select that many candidates by BM25 lexical score, then AMI-rank
-    only those. With ``decompose``, table rows compete as their fields.
+    reciprocal-rank fusion. With ``decompose``, table rows compete as their fields.
     With ``filter_junk``, letter-less candidate bodies are excluded.
     """
     target_atom, target_text = resolve_target(atoms, target)
     eligible, same_leaf, copies, junk = select_eligible(
         atoms, target_atom, target_text, filter_junk=filter_junk
     )
-    if prefilter > 0 and target_atom is None:
-        eligible = bm25_top(eligible, target_text, prefilter)
     if not eligible:
         raise ValueError("No eligible candidates after exclusions.")
     target_tokens = count_tokens(target_text)
@@ -224,45 +218,6 @@ def resolve_target(atoms: Sequence[Atom], target: Target) -> tuple[Atom | None, 
 
 def _normalize(text: str) -> str:
     return " ".join(text.split())
-
-
-def bm25_top(atoms: Sequence[Atom], query: str, k: int) -> list[Atom]:
-    """Lexical prefilter: the k atoms with the best BM25 score for the query.
-
-    Pure Python, no dependencies; tokenizes on non-alphanumerics, lowercased.
-    """
-
-    def terms(text: str) -> list[str]:
-        return re.findall(r"[a-z0-9]+", text.lower())
-
-    q = terms(query)
-    docs = [terms(atom.rendered) for atom in atoms]
-    n = len(docs)
-    avgdl = sum(len(d) for d in docs) / n if n else 0.0
-    df: dict[str, int] = {}
-    for doc in docs:
-        for term in set(doc):
-            df[term] = df.get(term, 0) + 1
-    k1, b = 1.5, 0.75
-    scores: list[float] = []
-    for doc in docs:
-        tf: dict[str, int] = {}
-        for term in doc:
-            tf[term] = tf.get(term, 0) + 1
-        score = 0.0
-        for term in q:
-            if term not in tf:
-                continue
-            idf = math.log((n - df[term] + 0.5) / (df[term] + 0.5) + 1.0)
-            score += (
-                idf
-                * tf[term]
-                * (k1 + 1)
-                / (tf[term] + k1 * (1 - b + b * len(doc) / avgdl))
-            )
-        scores.append(score)
-    order = sorted(range(n), key=lambda i: (-scores[i], atoms[i].id))
-    return [atoms[i] for i in order[:k]]
 
 
 def select_eligible(

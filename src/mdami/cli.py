@@ -43,13 +43,6 @@ def _build_parser() -> argparse.ArgumentParser:
             help="model dtype (use float32 for the legacy 0.5B coder pin)",
         )
         p.add_argument(
-            "--prefilter",
-            type=int,
-            default=0,
-            help="literal targets only: BM25-select this many candidates before "
-            "AMI ranking (0 = score the full corpus)",
-        )
-        p.add_argument(
             "--direction",
             choices=("forward", "rrf"),
             default="forward",
@@ -118,7 +111,6 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             target,
             scorer.score,
             scorer.token_count,
-            prefilter=args.prefilter,
             direction=args.direction,
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
