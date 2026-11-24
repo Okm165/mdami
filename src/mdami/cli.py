@@ -57,6 +57,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "(parent inherits its best field)",
         )
         p.add_argument(
+            "--body-only",
+            action="store_true",
+            help="score atom bodies without the heading scope",
+        )
+        p.add_argument(
             "--filter-junk",
             action="store_true",
             help="exclude candidates whose body has no alphabetic characters",
@@ -115,6 +120,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
+            body_only=args.body_only,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -143,6 +149,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
+            body_only=args.body_only,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

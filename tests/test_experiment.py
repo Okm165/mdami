@@ -101,6 +101,24 @@ def test_filter_junk_drops_letterless_candidates() -> None:
     assert result.excluded_junk == 2
 
 
+def test_body_only_drops_heading_scope() -> None:
+    seen: list[str] = []
+
+    def recording_likelihood(contexts, target):
+        seen.extend(contexts)
+        return 3.0, [2.0 for _ in contexts]
+
+    rank(
+        CORPUS,
+        TextTarget(text="timer overflow flag"),
+        recording_likelihood,
+        count_tokens,
+        body_only=True,
+    )
+    assert "Timer\nFlags" not in "".join(seen)
+    assert "Counter wrapped." in " ".join(seen)
+
+
 def test_rrf_fuses_both_direction_orderings() -> None:
     result = rank(
         CORPUS,

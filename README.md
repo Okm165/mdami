@@ -123,7 +123,13 @@ Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_rrf_subatoms
 `--filter-junk` excludes candidates whose body has no alphabetic characters
 (OCR digit rows like `| 7 | 6 | 5 |` — the visible garbage in fragment
 queries). Measured neutral-to-slightly-positive on all three link benchmarks
-while removing all letter-less atoms from query output. Two other features
+while removing all letter-less atoms from query output.
+
+`--body-only` scores atom bodies without the heading scope (the reverse
+direction always scores bodies). Measured essentially neutral: forward
+0.156/0.110/0.282 vs 0.169/0.105/0.261 with scope; the rrf+subatoms
+configuration is bit-identical either way (0.517/0.152/0.455). Use it when
+tiny rows must not borrow credit from their headings. Two other features
 were implemented, measured, and **removed** for failing to earn their
 complexity: neighbor-context window units (slightly negative: 0.497/0.133)
 and query self-bootstrapping (drifted on fragments).

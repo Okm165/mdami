@@ -52,11 +52,14 @@ def _score_direction(
     likelihood: LikelihoodFn,
     reverse_likelihood: ReverseLikelihoodFn | None,
     decompose: bool,
+    body_only: bool = False,
 ) -> dict[AtomId, Measurement]:
     """Score every eligible atom once per direction; parent-best aggregation.
 
     With ``decompose``, table-row atoms are split into their |-separated
     fields and the parent inherits its best-scoring field (max aggregation).
+    With ``body_only``, forward scoring drops the heading scope (the reverse
+    direction always scores bodies).
     """
     from .records import AtomKind
 
@@ -67,7 +70,8 @@ def _score_direction(
             if fields:
                 units.extend((atom.id, f) for f in fields)
                 continue
-        units.append((atom.id, atom.rendered if direction == "forward" else atom.body))
+        use_body = body_only or direction != "forward"
+        units.append((atom.id, atom.body if use_body else atom.rendered))
     best: dict[AtomId, Measurement] = {}
     if direction == "forward":
         empty_nll, nlls = likelihood([text for _, text in units], target_text)
@@ -119,6 +123,7 @@ def rank(
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
     filter_junk: bool = False,
+    body_only: bool = False,
 ) -> RankResult:
     """Rank eligible atoms by descending AMI, ties by ascending atom ID.
 
@@ -144,6 +149,7 @@ def rank(
             likelihood,
             reverse_likelihood,
             decompose,
+            body_only,
         )
         reverse_best = _score_direction(
             "reverse",
@@ -152,6 +158,7 @@ def rank(
             likelihood,
             reverse_likelihood,
             decompose,
+            body_only,
         )
         fused = _fuse_rrf(forward_best, reverse_best)
         measured = [(atom, forward_best[atom.id], fused[atom.id]) for atom in eligible]
@@ -165,6 +172,7 @@ def rank(
             likelihood,
             reverse_likelihood,
             decompose,
+            body_only,
         )
         measured = [(atom, best[atom.id], 0.0) for atom in eligible]
         sort_key: Callable[[tuple[Atom, Measurement, float]], float] = (
@@ -275,6 +283,7 @@ def evaluate_links(
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
     filter_junk: bool = False,
+    body_only: bool = False,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -299,6 +308,7 @@ def evaluate_links(
             reverse_likelihood=reverse_likelihood,
             decompose=decompose,
             filter_junk=filter_junk,
+            body_only=body_only,
         )
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
