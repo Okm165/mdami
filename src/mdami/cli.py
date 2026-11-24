@@ -68,23 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="exclude candidates whose body has no alphabetic characters",
         )
-        p.add_argument(
-            "--windows",
-            type=int,
-            default=0,
-            help="sentences also compete with N following-neighbor context units",
-        )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
     _add_scoring_args(p_rank)
     target = p_rank.add_mutually_exclusive_group(required=True)
     target.add_argument("--target-id", type=str, help="atom ID of the target")
     target.add_argument("--text", type=str, help="literal target text")
-    p_rank.add_argument(
-        "--bootstrap",
-        action="store_true",
-        help="re-rank with the top-ranked atom's body as the target",
-    )
 
     p_eval = sub.add_parser("eval", help="evaluate annotated evidence links")
     _add_scoring_args(p_eval)
@@ -134,23 +123,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
-            windows=args.windows,
         )
-        if args.bootstrap and result.rows:
-            # Self-bootstrapping: re-rank using the top atom's body as the
-            # target (turns a fragment into a measured statement-form query).
-            result = experiment.rank(
-                atoms,
-                TextTarget(text=result.rows[0].atom.body),
-                scorer.score,
-                scorer.token_count,
-                prefilter=args.prefilter,
-                direction=args.direction,
-                reverse_likelihood=scorer.sequence_nll,
-                decompose=args.subatoms,
-                filter_junk=args.filter_junk,
-                windows=args.windows,
-            )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -178,7 +151,6 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
-            windows=args.windows,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

@@ -118,18 +118,15 @@ uv run --locked mdami eval data/experiments/sam3x8e-tc \
 ```
 Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_rrf_subatoms_junkfree.json`, `report_reverse_default.json`, and the sweep JSONs above.
 
-### Junk filtering and query bootstrapping
+### Junk filtering
 
 `--filter-junk` excludes candidates whose body has no alphabetic characters
 (OCR digit rows like `| 7 | 6 | 5 |` — the visible garbage in fragment
-queries). Measured neutral-to-slightly-positive on both link benchmarks
-(0.517/0.152) while removing all letter-less atoms from query output.
-`--bootstrap` (rank only) re-ranks the corpus with the top-ranked atom's body
-as the target; measured **not reliable** — it helped on some statements and
-drifted on fragments — so it is off by default and experimental.
-`--windows N` adds neighbor-joined sentence units (parent inherits its best);
-measured slightly negative (0.497/0.133 vs 0.517/0.152 at N=1) — off by
-default, kept for reproducibility.
+queries). Measured neutral-to-slightly-positive on all three link benchmarks
+while removing all letter-less atoms from query output. Two other features
+were implemented, measured, and **removed** for failing to earn their
+complexity: neighbor-context window units (slightly negative: 0.497/0.133)
+and query self-bootstrapping (drifted on fragments).
 
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \
