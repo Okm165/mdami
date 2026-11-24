@@ -1,7 +1,5 @@
 """Pure (relative_path, text) -> atoms transformation."""
 
-from pathlib import PurePosixPath
-
 import pysbd
 from markdown_it import MarkdownIt
 
@@ -124,7 +122,3 @@ def parse_document(path: str, text: str) -> tuple[tuple[Atom, ...], int]:
             unsupported += 1
 
     return tuple(atoms), unsupported
-
-
-def parse_markdown(path: PurePosixPath | str, text: str) -> tuple[Atom, ...]:
-    return parse_document(str(path), text)[0]
