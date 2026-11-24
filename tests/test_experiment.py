@@ -83,6 +83,24 @@ def test_reverse_direction_requires_likelihood() -> None:
         )
 
 
+def test_filter_junk_drops_letterless_candidates() -> None:
+    junk = parse_document(
+        "junk.md", "# T\n| 7 | 6 | 5 |\n\n| 3 | OVF | Counter wrapped. |\n"
+    )[0]
+    result = rank(
+        junk,
+        TextTarget(text="Counter wrapped"),
+        fake_likelihood,
+        count_tokens,
+        filter_junk=True,
+    )
+    ids = [row.atom.id for row in result.rows]
+    assert "junk.md@2.1" not in ids
+    assert "junk.md@2.2" not in ids
+    assert "junk.md@4.1" in ids
+    assert result.excluded_junk == 2
+
+
 def test_rrf_fuses_both_direction_orderings() -> None:
     result = rank(
         CORPUS,

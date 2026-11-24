@@ -1,5 +1,7 @@
 """Target resolution, eligibility, ranking and evidence-link evaluation."""
 
+import math
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -32,6 +34,7 @@ class RankResult:
     rows: tuple[RankRow, ...]
     excluded_same_leaf: int
     excluded_copy: int
+    excluded_junk: int = 0
 
     @property
     def pool_size(self) -> int:
@@ -117,6 +120,7 @@ def rank(
     direction: Direction = "forward",
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
+    filter_junk: bool = False,
 ) -> RankResult:
     """Rank eligible atoms by descending AMI, ties by ascending atom ID.
 
@@ -126,9 +130,12 @@ def rank(
     reciprocal-rank fusion. With ``prefilter`` > 0 and a literal target,
     first select that many candidates by BM25 lexical score, then AMI-rank
     only those. With ``decompose``, table rows compete as their fields.
+    With ``filter_junk``, letter-less candidate bodies are excluded.
     """
     target_atom, target_text = resolve_target(atoms, target)
-    eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
+    eligible, same_leaf, copies, junk = select_eligible(
+        atoms, target_atom, target_text, filter_junk=filter_junk
+    )
     if prefilter > 0 and target_atom is None:
         eligible = bm25_top(eligible, target_text, prefilter)
     if not eligible:
@@ -181,6 +188,7 @@ def rank(
         rows=rows,
         excluded_same_leaf=same_leaf,
         excluded_copy=copies,
+        excluded_junk=junk,
     )
 
 
@@ -208,8 +216,6 @@ def bm25_top(atoms: Sequence[Atom], query: str, k: int) -> list[Atom]:
 
     Pure Python, no dependencies; tokenizes on non-alphanumerics, lowercased.
     """
-    import math
-    import re
 
     def terms(text: str) -> list[str]:
         return re.findall(r"[a-z0-9]+", text.lower())
@@ -245,24 +251,37 @@ def bm25_top(atoms: Sequence[Atom], query: str, k: int) -> list[Atom]:
 
 
 def select_eligible(
-    atoms: Sequence[Atom], target_atom: Atom | None, target_text: str
-) -> tuple[list[Atom], int, int]:
+    atoms: Sequence[Atom],
+    target_atom: Atom | None,
+    target_text: str,
+    filter_junk: bool = False,
+) -> tuple[list[Atom], int, int, int]:
     """Corpus targets exclude the target's leaf and verbatim copies of the
-    whitespace-normalized target; literal targets use the full pool."""
-    if target_atom is None:
-        return list(atoms), 0, 0
+    whitespace-normalized target; literal targets use the full pool.
+
+    With ``filter_junk``, candidates whose body contains no alphabetic
+    characters (OCR address soup, bare digit rows) are excluded too — the
+    measured top-rank garbage in fragment queries.
+    """
     normalized_target = _normalize(target_text)
     eligible: list[Atom] = []
-    same_leaf = copies = 0
+    same_leaf = copies = junk = 0
     for atom in atoms:
-        if atom.path == target_atom.path and atom.span == target_atom.span:
-            same_leaf += 1
-            continue
-        if normalized_target in _normalize(atom.rendered):
-            copies += 1
+        if target_atom is not None:
+            if atom.path == target_atom.path and atom.span == target_atom.span:
+                same_leaf += 1
+                continue
+            if normalized_target in _normalize(atom.rendered):
+                copies += 1
+                continue
+        if filter_junk and not _HAS_LETTER.search(atom.body):
+            junk += 1
             continue
         eligible.append(atom)
-    return eligible, same_leaf, copies
+    return eligible, same_leaf, copies, junk
+
+
+_HAS_LETTER = re.compile(r"[A-Za-z]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +304,7 @@ def evaluate_links(
     direction: Direction = "forward",
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
+    filter_junk: bool = False,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -308,6 +328,7 @@ def evaluate_links(
             direction=direction,
             reverse_likelihood=reverse_likelihood,
             decompose=decompose,
+            filter_junk=filter_junk,
         )
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
