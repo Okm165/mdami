@@ -158,3 +158,11 @@ generalizes across vendors without tuning.
 adapter · `metrics.py` pure math · `experiment.py` ranking/eligibility ·
 `files.py` I/O · `cli.py` wiring. Fixtures live in `examples/ocr/`; real manual
 input goes in `data/ocr/`.
+
+### Environment notes (this host)
+
+- If model loading stalls on Hugging Face retries with the flaky network, run
+  with `HF_HUB_OFFLINE=1` — the default checkpoint is fully cached.
+- Model weights used by the sweep lived under `/tmp` (tmpfs, quota'd). The
+  1.5B/3B sweep losers were deleted to free quota; their reports remain the
+  record and `snapshot_download` restores them on demand.
