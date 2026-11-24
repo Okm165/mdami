@@ -116,7 +116,17 @@ uv run --locked mdami eval data/experiments/sam3x8e-tc \
     --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \
     --direction rrf --subatoms
 ```
-Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_reverse_default.json`, and the sweep JSONs above.
+Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_rrf_subatoms_junkfree.json`, `report_reverse_default.json`, and the sweep JSONs above.
+
+### Junk filtering and query bootstrapping
+
+`--filter-junk` excludes candidates whose body has no alphabetic characters
+(OCR digit rows like `| 7 | 6 | 5 |` — the visible garbage in fragment
+queries). Measured neutral-to-slightly-positive on both link benchmarks
+(0.517/0.152) while removing all letter-less atoms from query output.
+`--bootstrap` (rank only) re-ranks the corpus with the top-ranked atom's body
+as the target; measured **not reliable** — it helped on some statements and
+drifted on fragments — so it is off by default and experimental.
 
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \
