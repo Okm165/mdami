@@ -51,11 +51,17 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--direction",
-            choices=("reverse", "forward"),
+            choices=("forward", "reverse", "rrf"),
             default="forward",
-            help="AMI direction: forward scores h(target | atom) (best for "
-            "literal queries), reverse scores h(atom | target) gain "
-            "(best for corpus-target benchmarks; eval default)",
+            help="AMI direction: forward scores h(target | atom) (measured "
+            "most robust), reverse scores h(atom | target) gain, rrf fuses "
+            "both by reciprocal-rank fusion",
+        )
+        p.add_argument(
+            "--subatoms",
+            action="store_true",
+            help="let table rows compete as their |-separated fields "
+            "(parent inherits its best field)",
         )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
@@ -110,6 +116,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             prefilter=args.prefilter,
             direction=args.direction,
             reverse_likelihood=scorer.sequence_nll,
+            decompose=args.subatoms,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -136,6 +143,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             meta={"run_metadata": scorer.meta.log_line()},
             direction=args.direction,
             reverse_likelihood=scorer.sequence_nll,
+            decompose=args.subatoms,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

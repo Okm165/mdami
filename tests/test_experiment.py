@@ -83,6 +83,43 @@ def test_reverse_direction_requires_likelihood() -> None:
         )
 
 
+def test_rrf_fuses_both_direction_orderings() -> None:
+    result = rank(
+        CORPUS,
+        CorpusTarget(_by_id()["timer.md@9.1"].id),
+        fake_likelihood,
+        count_tokens,
+        direction="rrf",
+        reverse_likelihood=fake_reverse_likelihood,
+    )
+    ids = [row.atom.id for row in result.rows]
+    # Forward ranks OVF row first (ami 2.0); reverse also ranks it first
+    # (gain 0.5); RRF must keep it at rank 1.
+    assert ids[0] == "timer.md@5.1"
+    assert len(ids) == len({row.atom.id for row in result.rows})
+
+
+def test_decompose_lets_table_row_compete_as_fields() -> None:
+    # Give the OVF row's *field* "Counter wrapped." the best reverse gain.
+    def field_likelihood(context, bodies):
+        return [1.0] * len(bodies), [
+            0.1 if body == "Counter wrapped." else 2.0 for body in bodies
+        ]
+
+    result = rank(
+        CORPUS,
+        CorpusTarget(_by_id()["timer.md@9.1"].id),
+        fake_likelihood,
+        count_tokens,
+        direction="reverse",
+        reverse_likelihood=field_likelihood,
+        decompose=True,
+    )
+    # The OVF row wins via its best field even though the whole-body score
+    # would have ranked it below the sentences.
+    assert result.rows[0].atom.id == "timer.md@5.1"
+
+
 def _by_id():
     return {atom.id: atom for atom in CORPUS}
 

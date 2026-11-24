@@ -104,14 +104,19 @@ irrelevant context. To reproduce:
 
 | direction | metric ranked | SAM3X8E-TC (13 links) | SAMD20-WDT (13 links) |
 |---|---|---|---|
+| **rrf fusion + `--subatoms`** | fused ranks | **0.516** | **0.152** |
+| rrf fusion | fused ranks | 0.347 | 0.057 |
 | **forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)}** | PPL difference | 0.169 | **0.105** |
 | reverse h(atom \| target), gain g = h(∅) − h(c) | bits per body token | **0.206** | 0.019 |
 
-Both are pure likelihood quantities — no heuristics. The reverse direction won
-decisively on the TC chapter but collapsed on the WDT chapter, so **forward is
-the default** for both `rank` and `eval`: it is the more robust direction
-across manuals. `--direction reverse` reproduces the TC-chapter result.
-Raw reports: `report_reverse_default.json`, and the sweep JSONs above.
+Both directions are pure likelihood quantities — no heuristics. RRF (reciprocal-rank fusion, k=60) combines the two orderings and `--subatoms` lets table rows compete as their `|`-separated fields (parent inherits its best field, max aggregation — LongCodeZip's coarse-to-fine selection). **rrf + subatoms is the best measured configuration on both manuals** and the new recommended setup:
+
+```sh
+uv run --locked mdami eval data/experiments/sam3x8e-tc \
+    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \
+    --direction rrf --subatoms
+```
+Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_reverse_default.json`, and the sweep JSONs above.
 
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \

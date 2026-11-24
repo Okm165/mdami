@@ -9,6 +9,7 @@ from .records import (
     Atom,
     AtomId,
     CorpusTarget,
+    Measurement,
     RankRow,
     Target,
     TextTarget,
@@ -22,7 +23,8 @@ ReverseLikelihoodFn = Callable[
     [str, Sequence[str]], tuple[Sequence[float], Sequence[float]]
 ]
 TokenCounter = Callable[[str], int]
-Direction = Literal["forward", "reverse"]
+Direction = Literal["forward", "reverse", "rrf"]
+_RRF_K = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +36,152 @@ class RankResult:
     @property
     def pool_size(self) -> int:
         return len(self.rows)
+
+
+def _table_fields(body: str) -> list[str]:
+    """Non-empty |-separated fields of a table-row body."""
+    return [f.strip() for f in body.split("|") if f.strip()]
+
+
+def _score_direction(
+    direction: Direction,
+    eligible: Sequence[Atom],
+    target_text: str,
+    likelihood: LikelihoodFn,
+    reverse_likelihood: ReverseLikelihoodFn | None,
+    decompose: bool,
+) -> dict[AtomId, Measurement]:
+    """Score every eligible atom once per direction; parent-best aggregation.
+
+    With ``decompose``, table-row atoms are split into their |-separated
+    fields and the parent inherits its best-scoring field (max aggregation).
+    """
+    from .records import AtomKind
+
+    units: list[tuple[AtomId, str]] = []
+    for atom in eligible:
+        if decompose and atom.kind is AtomKind.TABLE_ROW:
+            fields = _table_fields(atom.body)
+            if fields:
+                units.extend((atom.id, f) for f in fields)
+                continue
+        units.append((atom.id, atom.rendered if direction == "forward" else atom.body))
+    best: dict[AtomId, Measurement] = {}
+    if direction == "forward":
+        empty_nll, nlls = likelihood([text for _, text in units], target_text)
+        for (atom_id, _), nll in zip(units, nlls, strict=True):
+            measurement = from_mean_nll(empty_nll, nll)
+            if atom_id not in best or measurement.ami > best[atom_id].ami:
+                best[atom_id] = measurement
+    else:
+        if reverse_likelihood is None:
+            raise ValueError("direction='reverse' requires reverse_likelihood.")
+        bodies = [text for _, text in units]
+        empties, conds = reverse_likelihood(target_text, bodies)
+        for (atom_id, _), empty, cond in zip(units, empties, conds, strict=True):
+            measurement = from_mean_nll(empty, cond)
+            if (
+                atom_id not in best
+                or measurement.bits_per_target_token
+                > best[atom_id].bits_per_target_token
+            ):
+                best[atom_id] = measurement
+    return best
+
+
+def _fuse_rrf(
+    forward_best: dict[AtomId, Measurement], reverse_best: dict[AtomId, Measurement]
+) -> dict[AtomId, float]:
+    """Reciprocal-rank fusion of the two direction orderings."""
+
+    def ranks(
+        best: dict[AtomId, Measurement], key: Callable[[Measurement], float]
+    ) -> dict[AtomId, int]:
+        order = sorted(best.items(), key=lambda item: (-key(item[1]), item[0]))
+        return {atom_id: i for i, (atom_id, _) in enumerate(order, start=1)}
+
+    fwd = ranks(forward_best, lambda m: m.ami)
+    rev = ranks(reverse_best, lambda m: m.bits_per_target_token)
+    return {
+        atom_id: 1.0 / (_RRF_K + fwd[atom_id]) + 1.0 / (_RRF_K + rev[atom_id])
+        for atom_id in forward_best
+    }
+
+
+def rank(
+    atoms: Sequence[Atom],
+    target: Target,
+    likelihood: LikelihoodFn,
+    count_tokens: TokenCounter,
+    prefilter: int = 0,
+    direction: Direction = "forward",
+    reverse_likelihood: ReverseLikelihoodFn | None = None,
+    decompose: bool = False,
+) -> RankResult:
+    """Rank eligible atoms by descending AMI, ties by ascending atom ID.
+
+    ``direction="forward"`` scores h(target | atom) with ``likelihood``;
+    ``direction="reverse"`` scores h(atom | target) with
+    ``reverse_likelihood``; ``direction="rrf"`` fuses both orderings by
+    reciprocal-rank fusion. With ``prefilter`` > 0 and a literal target,
+    first select that many candidates by BM25 lexical score, then AMI-rank
+    only those. With ``decompose``, table rows compete as their fields.
+    """
+    target_atom, target_text = resolve_target(atoms, target)
+    eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
+    if prefilter > 0 and target_atom is None:
+        eligible = bm25_top(eligible, target_text, prefilter)
+    if not eligible:
+        raise ValueError("No eligible candidates after exclusions.")
+    target_tokens = count_tokens(target_text)
+
+    if direction == "rrf":
+        forward_best = _score_direction(
+            "forward", eligible, target_text, likelihood, reverse_likelihood, decompose
+        )
+        reverse_best = _score_direction(
+            "reverse", eligible, target_text, likelihood, reverse_likelihood, decompose
+        )
+        fused = _fuse_rrf(forward_best, reverse_best)
+        measured = [(atom, forward_best[atom.id], fused[atom.id]) for atom in eligible]
+        measured.sort(key=lambda item: (-item[2], item[0].id))
+        context_tokens = {atom.id: count_tokens(atom.rendered) for atom in eligible}
+    else:
+        best = _score_direction(
+            direction, eligible, target_text, likelihood, reverse_likelihood, decompose
+        )
+        measured = [(atom, best[atom.id], 0.0) for atom in eligible]
+        sort_key: Callable[[tuple[Atom, Measurement, float]], float] = (
+            (lambda item: -item[1].ami)
+            if direction == "forward"
+            else (lambda item: -item[1].bits_per_target_token)
+        )
+        measured.sort(key=lambda item: (sort_key(item), item[0].id))
+        context_tokens = {
+            atom.id: (
+                count_tokens(atom.rendered)
+                if direction == "forward"
+                else count_tokens(target_text)
+            )
+            for atom in eligible
+        }
+    best_by_id = {atom.id: measurement for atom, measurement, _ in measured}
+    rows = tuple(
+        RankRow(
+            rank=i,
+            atom=atom,
+            measurement=best_by_id[atom.id],
+            body_tokens=count_tokens(atom.body),
+            context_tokens=context_tokens[atom.id],
+            target_tokens=target_tokens,
+        )
+        for i, (atom, _, _) in enumerate(measured, start=1)
+    )
+    return RankResult(
+        rows=rows,
+        excluded_same_leaf=same_leaf,
+        excluded_copy=copies,
+    )
 
 
 def resolve_target(atoms: Sequence[Atom], target: Target) -> tuple[Atom | None, str]:
@@ -117,74 +265,6 @@ def select_eligible(
     return eligible, same_leaf, copies
 
 
-def rank(
-    atoms: Sequence[Atom],
-    target: Target,
-    likelihood: LikelihoodFn,
-    count_tokens: TokenCounter,
-    prefilter: int = 0,
-    direction: Direction = "forward",
-    reverse_likelihood: ReverseLikelihoodFn | None = None,
-) -> RankResult:
-    """Rank eligible atoms by descending AMI, ties by ascending atom ID.
-
-    ``direction="forward"`` scores h(target | atom) with ``likelihood``;
-    ``direction="reverse"`` scores h(atom | target) with
-    ``reverse_likelihood`` — the measured-stronger direction on real
-    manuals. With ``prefilter`` > 0 and a literal target, first select that
-    many candidates by BM25 lexical score, then AMI-rank only those.
-    """
-    target_atom, target_text = resolve_target(atoms, target)
-    eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
-    if prefilter > 0 and target_atom is None:
-        eligible = bm25_top(eligible, target_text, prefilter)
-    if not eligible:
-        raise ValueError("No eligible candidates after exclusions.")
-    target_tokens = count_tokens(target_text)
-    if direction == "forward":
-        empty_nll, nlls = likelihood([atom.rendered for atom in eligible], target_text)
-        measured = [
-            (atom, from_mean_nll(empty_nll, nll))
-            for atom, nll in zip(eligible, nlls, strict=True)
-        ]
-        context_tokens = [count_tokens(atom.rendered) for atom in eligible]
-        # Forward: shared empty prefix, AMI order == gain order.
-        measured.sort(key=lambda item: (-item[1].ami, item[0].id))
-    else:
-        if reverse_likelihood is None:
-            raise ValueError("direction='reverse' requires reverse_likelihood.")
-        empties, conds = reverse_likelihood(
-            target_text, [atom.body for atom in eligible]
-        )
-        measured = [
-            (atom, from_mean_nll(empty, cond))
-            for atom, empty, cond in zip(eligible, empties, conds, strict=True)
-        ]
-        context_tokens = [target_tokens] * len(eligible)
-        # Reverse: h(empty) varies per candidate body, so the exp-difference
-        # AMI mixes in the body's a-priori perplexity. Rank by the per-token
-        # gain g = h(empty) - h(cond) (bits per body token) — the pure
-        # compression improvement, measured stronger.
-        measured.sort(key=lambda item: (-item[1].bits_per_target_token, item[0].id))
-    ctx_by_atom = dict(zip((a.id for a, _ in measured), context_tokens, strict=True))
-    rows = tuple(
-        RankRow(
-            rank=i,
-            atom=atom,
-            measurement=measurement,
-            body_tokens=count_tokens(atom.body),
-            context_tokens=ctx_by_atom[atom.id],
-            target_tokens=target_tokens,
-        )
-        for i, (atom, measurement) in enumerate(measured, start=1)
-    )
-    return RankResult(
-        rows=rows,
-        excluded_same_leaf=same_leaf,
-        excluded_copy=copies,
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class EvalReport:
     targets: tuple[dict[str, object], ...]
@@ -204,6 +284,7 @@ def evaluate_links(
     meta: dict[str, object] | None = None,
     direction: Direction = "forward",
     reverse_likelihood: ReverseLikelihoodFn | None = None,
+    decompose: bool = False,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -226,6 +307,7 @@ def evaluate_links(
             count_tokens,
             direction=direction,
             reverse_likelihood=reverse_likelihood,
+            decompose=decompose,
         )
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
