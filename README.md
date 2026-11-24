@@ -138,6 +138,17 @@ uv run --locked mdami eval data/experiments/sam3x8e-tc \
 ```
 
 
+## Third-manual validation (AT91SAM7S64, Watchdog Timer chapter)
+
+`data/experiments/at91sam7-wdt/` holds the WDT chapter of
+`ATMEL_Corporation__AT91SAM7S64_05__241161.pdf.md` (108 atoms, 13 annotated
+links, marked before scoring). Qwen3-0.6B-Base, bf16, batch 32:
+forward plain **0.261**; **rrf + subatoms + filter-junk 0.455 / Hit@3 0.462**.
+This is the third family (AT91 SAM7S, ARM7TDMI) and third OCR export, and it
+confirms the recommended configuration: **rrf + subatoms beats plain forward
+on all three manuals** (0.516/0.455 vs 0.169/0.261) and forward AMI
+generalizes across vendors without tuning.
+
 ## Layout
 
 `src/mdami/records.py` domain records · `markdown.py` parser · `gpu.py` scoring
