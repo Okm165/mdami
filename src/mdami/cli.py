@@ -51,11 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--direction",
-            choices=("forward", "reverse", "rrf"),
+            choices=("forward", "rrf"),
             default="forward",
-            help="AMI direction: forward scores h(target | atom) (measured "
-            "most robust), reverse scores h(atom | target) gain, rrf fuses "
-            "both by reciprocal-rank fusion",
+            help="AMI ranking: forward scores h(target | atom) per atom "
+            "(robust); rrf fuses forward with the reverse h(atom | target) "
+            "gain ordering (best measured, needs 2x passes)",
         )
         p.add_argument(
             "--subatoms",

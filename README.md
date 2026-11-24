@@ -109,7 +109,7 @@ irrelevant context. To reproduce:
 | **forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)}** | PPL difference | 0.169 | **0.105** |
 | reverse h(atom \| target), gain g = h(∅) − h(c) | bits per body token | **0.206** | 0.019 |
 
-Both directions are pure likelihood quantities — no heuristics. RRF (reciprocal-rank fusion, k=60) combines the two orderings and `--subatoms` lets table rows compete as their `|`-separated fields (parent inherits its best field, max aggregation — LongCodeZip's coarse-to-fine selection). **rrf + subatoms is the best measured configuration on both manuals** and the new recommended setup:
+Both directions are pure likelihood quantities — no heuristics. RRF (reciprocal-rank fusion, k=60) combines the two orderings and `--subatoms` lets table rows compete as their `|`-separated fields (parent inherits its best field, max aggregation — LongCodeZip's coarse-to-fine selection). **rrf + subatoms is the best measured configuration on all three manuals** and the recommended setup. Standalone reverse ranking was measured (0.206/0.019, worse on 2/3 manuals) and is no longer exposed; the raw reports remain the record.
 
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \
