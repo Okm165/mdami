@@ -68,6 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="exclude candidates whose body has no alphabetic characters",
         )
+        p.add_argument(
+            "--windows",
+            type=int,
+            default=0,
+            help="sentences also compete with N following-neighbor context units",
+        )
 
     p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
     _add_scoring_args(p_rank)
@@ -128,6 +134,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
+            windows=args.windows,
         )
         if args.bootstrap and result.rows:
             # Self-bootstrapping: re-rank using the top atom's body as the
@@ -142,6 +149,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
                 reverse_likelihood=scorer.sequence_nll,
                 decompose=args.subatoms,
                 filter_junk=args.filter_junk,
+                windows=args.windows,
             )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -170,6 +178,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             reverse_likelihood=scorer.sequence_nll,
             decompose=args.subatoms,
             filter_junk=args.filter_junk,
+            windows=args.windows,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

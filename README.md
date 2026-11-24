@@ -127,6 +127,9 @@ queries). Measured neutral-to-slightly-positive on both link benchmarks
 `--bootstrap` (rank only) re-ranks the corpus with the top-ranked atom's body
 as the target; measured **not reliable** — it helped on some statements and
 drifted on fragments — so it is off by default and experimental.
+`--windows N` adds neighbor-joined sentence units (parent inherits its best);
+measured slightly negative (0.497/0.133 vs 0.517/0.152 at N=1) — off by
+default, kept for reproducibility.
 
 ```sh
 uv run --locked mdami eval data/experiments/sam3x8e-tc \

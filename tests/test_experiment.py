@@ -101,6 +101,32 @@ def test_filter_junk_drops_letterless_candidates() -> None:
     assert result.excluded_junk == 2
 
 
+def test_windows_adds_neighbor_context_unit() -> None:
+    # The OVF row's *following sentence* completes it; with windows=1 the
+    # parent sentence inherits the best (neighbor-joined) unit.
+    def neighbor_likelihood(contexts, target):
+        # Only @9.1's joined window unit (Operation scope, own body plus the
+        # following neighbor's body) scores best; everything else 2.0.
+        return 3.0, [
+            0.5
+            if context.startswith("Timer\nOperation\nFirmware")
+            and context.count("Firmware") == 3
+            else 2.0
+            for context in contexts
+        ]
+
+    result = rank(
+        CORPUS,
+        TextTarget(text="timer overflow flag"),
+        neighbor_likelihood,
+        count_tokens,
+        windows=1,
+    )
+    ids = [row.atom.id for row in result.rows]
+    # The sentence that owns the joined unit must rank first.
+    assert ids[0] == "timer.md@9.1"
+
+
 def test_rrf_fuses_both_direction_orderings() -> None:
     result = rank(
         CORPUS,

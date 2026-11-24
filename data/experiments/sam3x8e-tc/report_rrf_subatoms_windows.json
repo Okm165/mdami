@@ -1,0 +1,116 @@
+{
+  "targets": [
+    {
+      "target_id": "tc_chapter.md@196.3",
+      "evidence_ids": [
+        "tc_chapter.md@610.1"
+      ],
+      "rank": 7,
+      "pool_size": 833
+    },
+    {
+      "target_id": "tc_chapter.md@196.4",
+      "evidence_ids": [
+        "tc_chapter.md@666.1"
+      ],
+      "rank": 1,
+      "pool_size": 833
+    },
+    {
+      "target_id": "tc_chapter.md@196.5",
+      "evidence_ids": [
+        "tc_chapter.md@744.1"
+      ],
+      "rank": 1,
+      "pool_size": 833
+    },
+    {
+      "target_id": "tc_chapter.md@196.9",
+      "evidence_ids": [
+        "tc_chapter.md@663.1"
+      ],
+      "rank": 1,
+      "pool_size": 833
+    },
+    {
+      "target_id": "tc_chapter.md@179.1",
+      "evidence_ids": [
+        "tc_chapter.md@638.1"
+      ],
+      "rank": 1,
+      "pool_size": 842
+    },
+    {
+      "target_id": "tc_chapter.md@180.1",
+      "evidence_ids": [
+        "tc_chapter.md@650.1"
+      ],
+      "rank": 6,
+      "pool_size": 842
+    },
+    {
+      "target_id": "tc_chapter.md@185.2",
+      "evidence_ids": [
+        "tc_chapter.md@653.1"
+      ],
+      "rank": 57,
+      "pool_size": 835
+    },
+    {
+      "target_id": "tc_chapter.md@212.3",
+      "evidence_ids": [
+        "tc_chapter.md@683.1"
+      ],
+      "rank": 122,
+      "pool_size": 823
+    },
+    {
+      "target_id": "tc_chapter.md@212.20",
+      "evidence_ids": [
+        "tc_chapter.md@683.1"
+      ],
+      "rank": 111,
+      "pool_size": 823
+    },
+    {
+      "target_id": "tc_chapter.md@291.1",
+      "evidence_ids": [
+        "tc_chapter.md@774.1"
+      ],
+      "rank": 73,
+      "pool_size": 841
+    },
+    {
+      "target_id": "tc_chapter.md@282.3",
+      "evidence_ids": [
+        "tc_chapter.md@669.1"
+      ],
+      "rank": 1,
+      "pool_size": 838
+    },
+    {
+      "target_id": "tc_chapter.md@492.6",
+      "evidence_ids": [
+        "tc_chapter.md@616.1"
+      ],
+      "rank": 10,
+      "pool_size": 815
+    },
+    {
+      "target_id": "tc_chapter.md@212.14",
+      "evidence_ids": [
+        "tc_chapter.md@680.1"
+      ],
+      "rank": 1,
+      "pool_size": 823
+    }
+  ],
+  "mrr": 0.4967670792023387,
+  "hit_at_3": 0.46153846153846156,
+  "num_targets": 13,
+  "median_body_tokens": 20.0,
+  "p95_body_tokens": 66.0,
+  "meta": {
+    "run_metadata": "model=Qwen/Qwen3-0.6B-Base@da87bfb608c14b7cf20ba1ce41287e8de496c0cd torch=2.13.0+rocm7.2 backend=HIP 7.2.53211 dtype=bfloat16 device=AMD Radeon Graphics batch_size=32"
+  }
+}

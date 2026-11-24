@@ -53,22 +53,42 @@ def _score_direction(
     likelihood: LikelihoodFn,
     reverse_likelihood: ReverseLikelihoodFn | None,
     decompose: bool,
+    windows: int = 0,
 ) -> dict[AtomId, Measurement]:
     """Score every eligible atom once per direction; parent-best aggregation.
 
     With ``decompose``, table-row atoms are split into their |-separated
     fields and the parent inherits its best-scoring field (max aggregation).
+    With ``windows`` > 0, each sentence atom also competes as a unit
+    concatenated with its following ``windows`` eligible same-file sentence
+    bodies (context-window candidate); the parent inherits its best unit.
     """
     from .records import AtomKind
 
+    def next_bodies(index: int, count: int) -> str:
+        parts = [eligible[index].body]
+        following = eligible[index + 1 : index + 1 + count]
+        for neighbor in following:
+            if neighbor.path == eligible[index].path:
+                parts.append(neighbor.body)
+        return " ".join(parts)
+
     units: list[tuple[AtomId, str]] = []
-    for atom in eligible:
+    for index, atom in enumerate(eligible):
         if decompose and atom.kind is AtomKind.TABLE_ROW:
             fields = _table_fields(atom.body)
             if fields:
                 units.extend((atom.id, f) for f in fields)
                 continue
         units.append((atom.id, atom.rendered if direction == "forward" else atom.body))
+        if windows > 0 and atom.kind is AtomKind.SENTENCE:
+            joined = next_bodies(index, windows)
+            units.append(
+                (
+                    atom.id,
+                    atom.rendered + " " + joined if direction == "forward" else joined,
+                )
+            )
     best: dict[AtomId, Measurement] = {}
     if direction == "forward":
         empty_nll, nlls = likelihood([text for _, text in units], target_text)
@@ -121,6 +141,7 @@ def rank(
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
     filter_junk: bool = False,
+    windows: int = 0,
 ) -> RankResult:
     """Rank eligible atoms by descending AMI, ties by ascending atom ID.
 
@@ -131,6 +152,8 @@ def rank(
     first select that many candidates by BM25 lexical score, then AMI-rank
     only those. With ``decompose``, table rows compete as their fields.
     With ``filter_junk``, letter-less candidate bodies are excluded.
+    With ``windows`` > 0, sentences also compete with following-neighbor
+    context units.
     """
     target_atom, target_text = resolve_target(atoms, target)
     eligible, same_leaf, copies, junk = select_eligible(
@@ -144,10 +167,22 @@ def rank(
 
     if direction == "rrf":
         forward_best = _score_direction(
-            "forward", eligible, target_text, likelihood, reverse_likelihood, decompose
+            "forward",
+            eligible,
+            target_text,
+            likelihood,
+            reverse_likelihood,
+            decompose,
+            windows,
         )
         reverse_best = _score_direction(
-            "reverse", eligible, target_text, likelihood, reverse_likelihood, decompose
+            "reverse",
+            eligible,
+            target_text,
+            likelihood,
+            reverse_likelihood,
+            decompose,
+            windows,
         )
         fused = _fuse_rrf(forward_best, reverse_best)
         measured = [(atom, forward_best[atom.id], fused[atom.id]) for atom in eligible]
@@ -155,7 +190,13 @@ def rank(
         context_tokens = {atom.id: count_tokens(atom.rendered) for atom in eligible}
     else:
         best = _score_direction(
-            direction, eligible, target_text, likelihood, reverse_likelihood, decompose
+            direction,
+            eligible,
+            target_text,
+            likelihood,
+            reverse_likelihood,
+            decompose,
+            windows,
         )
         measured = [(atom, best[atom.id], 0.0) for atom in eligible]
         sort_key: Callable[[tuple[Atom, Measurement, float]], float] = (
@@ -305,6 +346,7 @@ def evaluate_links(
     reverse_likelihood: ReverseLikelihoodFn | None = None,
     decompose: bool = False,
     filter_junk: bool = False,
+    windows: int = 0,
 ) -> EvalReport:
     """For each distinct target, find the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
@@ -329,6 +371,7 @@ def evaluate_links(
             reverse_likelihood=reverse_likelihood,
             decompose=decompose,
             filter_junk=filter_junk,
+            windows=windows,
         )
         found = next(
             (row.rank for row in result.rows if row.atom.id in evidence_ids), None
