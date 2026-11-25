@@ -5,129 +5,80 @@ import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from . import experiment, files
-from .gpu import MODEL_ID, REVISION, Scorer
-from .records import CorpusTarget, TextTarget
+from . import MODEL_ID, REVISION, experiment, files
+from .records import AtomId, CorpusTarget, TextTarget
+
+if TYPE_CHECKING:
+    from .gpu import Scorer
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdami",
-        description=(
-            "Rank Markdown source units by how much they help a frozen causal "
-            "LM predict an existing target text."
-        ),
+        description="Rank Markdown source units by bidirectional AMI under a "
+        "frozen causal LM.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_atoms = sub.add_parser("atoms", help="emit extracted atoms as JSONL")
-    p_atoms.add_argument("root", type=str, help="directory containing *.md files")
+    p_atoms = sub.add_parser("atoms", help="emit extracted atoms as JSONL (no GPU)")
+    p_atoms.add_argument("root", help="directory containing *.md files")
 
-    def _add_scoring_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("root", type=str, help="directory containing *.md files")
+    def scoring(name: str, help_text: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("root", help="directory containing *.md files")
+        p.add_argument("--batch-size", type=int, default=4, help="rows per pass")
+        p.add_argument("--model", default=MODEL_ID, help="HF model id")
+        p.add_argument("--revision", default=REVISION, help="HF revision")
         p.add_argument(
-            "--batch-size", type=int, default=4, help="candidates per forward pass"
+            "--dtype", default="float32", choices=("float32", "bfloat16", "float16")
         )
-        p.add_argument(
-            "--model", type=str, default=MODEL_ID, help="HF model id to score with"
-        )
-        p.add_argument(
-            "--revision", type=str, default=REVISION, help="HF revision/commit"
-        )
-        p.add_argument(
-            "--dtype",
-            type=str,
-            default="bfloat16",
-            choices=("float32", "bfloat16", "float16"),
-            help="model dtype (use float32 for the legacy 0.5B coder pin)",
-        )
-        p.add_argument(
-            "--direction",
-            choices=("forward", "rrf"),
-            default="forward",
-            help="AMI ranking: forward scores h(target | atom) per atom "
-            "(robust); rrf fuses forward with the reverse h(atom | target) "
-            "gain ordering (best measured, needs 2x passes)",
-        )
-        p.add_argument(
-            "--subatoms",
-            action="store_true",
-            help="let table rows compete as their |-separated fields "
-            "(parent inherits its best field)",
-        )
-        p.add_argument(
-            "--body-only",
-            action="store_true",
-            help="score atom bodies without the heading scope",
-        )
-        p.add_argument(
-            "--filter-junk",
-            action="store_true",
-            help="exclude candidates whose body has no alphabetic characters",
-        )
+        return p
 
-    p_rank = sub.add_parser("rank", help="rank eligible atoms for one target")
-    _add_scoring_args(p_rank)
+    p_rank = scoring("rank", "rank every eligible atom for one target (JSONL)")
     target = p_rank.add_mutually_exclusive_group(required=True)
-    target.add_argument("--target-id", type=str, help="atom ID of the target")
-    target.add_argument("--text", type=str, help="literal target text")
+    target.add_argument("--target-id", help="atom ID of a corpus target")
+    target.add_argument("--text", help="literal target text")
 
-    p_eval = sub.add_parser("eval", help="evaluate annotated evidence links")
-    _add_scoring_args(p_eval)
-    p_eval.add_argument("--links", type=str, required=True, help="TSV of links")
+    p_eval = scoring("eval", "MRR / Hit@3 over annotated evidence links (JSON)")
+    p_eval.add_argument("--links", required=True, help="TSV: target_id, evidence_id")
     return parser
+
+
+def _scorer(args: argparse.Namespace) -> "Scorer":
+    from .gpu import Scorer  # Torch loads only for scoring commands
+
+    scorer = Scorer(args.batch_size, args.model, args.revision, args.dtype)
+    print(scorer.meta.log_line(), file=sys.stderr)
+    return scorer
 
 
 def _cmd_atoms(args: argparse.Namespace) -> int:
     atoms, summaries = files.load_corpus(Path(args.root))
     files.write_jsonl(files.atom_to_dict(atom) for atom in atoms)
-    for summary in summaries:
+    for s in summaries:
         print(
-            f"{summary.path}: {summary.atoms} atoms, "
-            f"{summary.unsupported_blocks} unsupported blocks",
+            f"{s.path}: {s.atoms} atoms, {s.unsupported_blocks} unsupported blocks",
             file=sys.stderr,
         )
     return 0
 
 
-def _make_scorer(args: argparse.Namespace) -> Scorer:
-    scorer = Scorer(
-        batch_size=args.batch_size,
-        model_id=args.model,
-        revision=args.revision,
-        dtype=args.dtype,
-    )
-    print(scorer.meta.log_line(), file=sys.stderr)
-    return scorer
-
-
 def _cmd_rank(args: argparse.Namespace) -> int:
     atoms, _ = files.load_corpus(Path(args.root))
-    scorer = _make_scorer(args)
+    scorer = _scorer(args)
     target = (
-        CorpusTarget(atom_id=args.target_id)
+        CorpusTarget(AtomId(args.target_id))
         if args.target_id is not None
-        else TextTarget(text=args.text)
+        else TextTarget(args.text)
     )
-    try:
-        result = experiment.rank(
-            atoms,
-            target,
-            scorer.score,
-            scorer.token_count,
-            direction=args.direction,
-            reverse_likelihood=scorer.sequence_nll,
-            decompose=args.subatoms,
-            filter_junk=args.filter_junk,
-            body_only=args.body_only,
-        )
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+    result = experiment.rank(
+        atoms, target, scorer.forward, scorer.reverse, scorer.token_count
+    )
     print(
         f"pool={result.pool_size} excluded_same_leaf={result.excluded_same_leaf} "
-        f"excluded_copy={result.excluded_copy} excluded_junk={result.excluded_junk}",
+        f"excluded_copy={result.excluded_copy}",
         file=sys.stderr,
     )
     files.write_jsonl(files.rank_row_to_dict(row) for row in result.rows)
@@ -137,35 +88,27 @@ def _cmd_rank(args: argparse.Namespace) -> int:
 def _cmd_eval(args: argparse.Namespace) -> int:
     atoms, _ = files.load_corpus(Path(args.root))
     links = files.read_links(Path(args.links))
-    scorer = _make_scorer(args)
-    try:
-        report = experiment.evaluate_links(
-            atoms,
-            links,
-            scorer.score,
-            scorer.token_count,
-            meta={"run_metadata": scorer.meta.log_line()},
-            direction=args.direction,
-            reverse_likelihood=scorer.sequence_nll,
-            decompose=args.subatoms,
-            filter_junk=args.filter_junk,
-            body_only=args.body_only,
-        )
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+    scorer = _scorer(args)
+    report = experiment.evaluate_links(
+        atoms,
+        links,
+        scorer.forward,
+        scorer.reverse,
+        scorer.token_count,
+        meta={"run_metadata": scorer.meta.log_line()},
+    )
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    handlers = {
-        "atoms": _cmd_atoms,
-        "rank": _cmd_rank,
-        "eval": _cmd_eval,
-    }
-    return handlers[args.command](args)
+    handler = {"atoms": _cmd_atoms, "rank": _cmd_rank, "eval": _cmd_eval}
+    try:
+        return handler[args.command](args)
+    except (ValueError, RuntimeError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

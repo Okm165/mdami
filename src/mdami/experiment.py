@@ -1,11 +1,25 @@
-"""Target resolution, eligibility, ranking and evidence-link evaluation."""
+"""Target resolution, eligibility, bidirectional AMI ranking and link eval.
 
-import re
+One ranking, no switches:
+
+1. Each eligible atom becomes scoring *units*: a table row competes as its
+   ``|`` fields, any other atom as itself (rendered with its heading scope).
+2. Forward  ``h(t | u)``: how much the unit compresses the target (AMI).
+   Reverse  ``h(u | t)``: how much the target compresses the unit (bits/token).
+3. An atom keeps its best unit per direction; the two orderings are fused by
+   reciprocal rank (scale-free, so nats and bits never mix).
+"""
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal
 
-from .metrics import from_mean_nll, hit_at_k, mean_reciprocal_rank, percentile
+from .metrics import (
+    bootstrap_ci,
+    from_mean_nll,
+    hit_at_k,
+    mean_reciprocal_rank,
+    percentile,
+)
 from .records import (
     Atom,
     AtomId,
@@ -16,16 +30,13 @@ from .records import (
     TextTarget,
 )
 
-# (contexts, target) -> (empty-prefix mean NLL, per-context mean NLL)
-LikelihoodFn = Callable[[Sequence[str], str], tuple[float, Sequence[float]]]
-# (context, bodies) -> (per-body empty-prefix mean NLL, per-body conditional
-# mean NLL given the context); ragged targets, one row per body.
-ReverseLikelihoodFn = Callable[
-    [str, Sequence[str]], tuple[Sequence[float], Sequence[float]]
-]
+# (contexts, target) -> (h(t | ∅), [h(t | c)])
+Forward = Callable[[Sequence[str], str], tuple[float, Sequence[float]]]
+# (target, bodies) -> ([h(b | ∅)], [h(b | t)])
+Reverse = Callable[[str, Sequence[str]], tuple[Sequence[float], Sequence[float]]]
 TokenCounter = Callable[[str], int]
-Direction = Literal["forward", "reverse", "rrf"]
-_RRF_K = 60
+
+RRF_K = 60  # standard reciprocal-rank-fusion constant
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,180 +44,72 @@ class RankResult:
     rows: tuple[RankRow, ...]
     excluded_same_leaf: int
     excluded_copy: int
-    excluded_junk: int = 0
 
     @property
     def pool_size(self) -> int:
         return len(self.rows)
 
 
-def _table_fields(body: str) -> list[str]:
-    """Non-empty |-separated fields of a table-row body."""
-    return [f.strip() for f in body.split("|") if f.strip()]
+def units(atom: Atom) -> list[tuple[str, str]]:
+    """``(forward context, reverse body)`` pairs an atom competes with."""
+    cells = [c for c in atom.cells if c]
+    return [(c, c) for c in cells] or [(atom.rendered, atom.body)]
 
 
-def _score_direction(
-    direction: Direction,
-    eligible: Sequence[Atom],
-    target_text: str,
-    likelihood: LikelihoodFn,
-    reverse_likelihood: ReverseLikelihoodFn | None,
-    decompose: bool,
-    body_only: bool = False,
-) -> dict[AtomId, Measurement]:
-    """Score every eligible atom once per direction; parent-best aggregation.
-
-    With ``decompose``, table-row atoms are split into their |-separated
-    fields and the parent inherits its best-scoring field (max aggregation).
-    With ``body_only``, forward scoring drops the heading scope (the reverse
-    direction always scores bodies).
-    """
-    from .records import AtomKind
-
-    units: list[tuple[AtomId, str]] = []
-    for atom in eligible:
-        if decompose and atom.kind is AtomKind.TABLE_ROW:
-            fields = _table_fields(atom.body)
-            if fields:
-                units.extend((atom.id, f) for f in fields)
-                continue
-        use_body = body_only or direction != "forward"
-        units.append((atom.id, atom.body if use_body else atom.rendered))
-    best: dict[AtomId, Measurement] = {}
-    if direction == "forward":
-        empty_nll, nlls = likelihood([text for _, text in units], target_text)
-        for (atom_id, _), nll in zip(units, nlls, strict=True):
-            measurement = from_mean_nll(empty_nll, nll)
-            if atom_id not in best or measurement.ami > best[atom_id].ami:
-                best[atom_id] = measurement
-    else:
-        if reverse_likelihood is None:
-            raise ValueError("direction='reverse' requires reverse_likelihood.")
-        bodies = [text for _, text in units]
-        empties, conds = reverse_likelihood(target_text, bodies)
-        for (atom_id, _), empty, cond in zip(units, empties, conds, strict=True):
-            measurement = from_mean_nll(empty, cond)
-            if (
-                atom_id not in best
-                or measurement.bits_per_target_token
-                > best[atom_id].bits_per_target_token
-            ):
-                best[atom_id] = measurement
-    return best
-
-
-def _fuse_rrf(
-    forward_best: dict[AtomId, Measurement], reverse_best: dict[AtomId, Measurement]
-) -> dict[AtomId, float]:
-    """Reciprocal-rank fusion of the two direction orderings."""
-
-    def ranks(
-        best: dict[AtomId, Measurement], key: Callable[[Measurement], float]
-    ) -> dict[AtomId, int]:
-        order = sorted(best.items(), key=lambda item: (-key(item[1]), item[0]))
-        return {atom_id: i for i, (atom_id, _) in enumerate(order, start=1)}
-
-    fwd = ranks(forward_best, lambda m: m.ami)
-    rev = ranks(reverse_best, lambda m: m.bits_per_target_token)
-    return {
-        atom_id: 1.0 / (_RRF_K + fwd[atom_id]) + 1.0 / (_RRF_K + rev[atom_id])
-        for atom_id in forward_best
-    }
+def _ordinal(score: dict[AtomId, float]) -> dict[AtomId, int]:
+    order = sorted(score, key=lambda a: (-score[a], a))
+    return {atom_id: i for i, atom_id in enumerate(order, start=1)}
 
 
 def rank(
     atoms: Sequence[Atom],
     target: Target,
-    likelihood: LikelihoodFn,
+    forward: Forward,
+    reverse: Reverse,
     count_tokens: TokenCounter,
-    direction: Direction = "forward",
-    reverse_likelihood: ReverseLikelihoodFn | None = None,
-    decompose: bool = False,
-    filter_junk: bool = False,
-    body_only: bool = False,
 ) -> RankResult:
-    """Rank eligible atoms by descending AMI, ties by ascending atom ID.
-
-    ``direction="forward"`` scores h(target | atom) with ``likelihood``;
-    ``direction="reverse"`` scores h(atom | target) with
-    ``reverse_likelihood``; ``direction="rrf"`` fuses both orderings by
-    reciprocal-rank fusion. With ``decompose``, table rows compete as their fields.
-    With ``filter_junk``, letter-less candidate bodies are excluded.
-    """
+    """Rank eligible atoms by fused bidirectional AMI; ties by atom ID."""
     target_atom, target_text = resolve_target(atoms, target)
-    eligible, same_leaf, copies, junk = select_eligible(
-        atoms, target_atom, target_text, filter_junk=filter_junk
-    )
+    eligible, same_leaf, copies = select_eligible(atoms, target_atom, target_text)
     if not eligible:
         raise ValueError("No eligible candidates after exclusions.")
-    target_tokens = count_tokens(target_text)
 
-    if direction == "rrf":
-        forward_best = _score_direction(
-            "forward",
-            eligible,
-            target_text,
-            likelihood,
-            reverse_likelihood,
-            decompose,
-            body_only,
-        )
-        reverse_best = _score_direction(
-            "reverse",
-            eligible,
-            target_text,
-            likelihood,
-            reverse_likelihood,
-            decompose,
-            body_only,
-        )
-        fused = _fuse_rrf(forward_best, reverse_best)
-        measured = [(atom, forward_best[atom.id], fused[atom.id]) for atom in eligible]
-        measured.sort(key=lambda item: (-item[2], item[0].id))
-        context_tokens = {atom.id: count_tokens(atom.rendered) for atom in eligible}
-    else:
-        best = _score_direction(
-            direction,
-            eligible,
-            target_text,
-            likelihood,
-            reverse_likelihood,
-            decompose,
-            body_only,
-        )
-        measured = [(atom, best[atom.id], 0.0) for atom in eligible]
-        sort_key: Callable[[tuple[Atom, Measurement, float]], float] = (
-            (lambda item: -item[1].ami)
-            if direction == "forward"
-            else (lambda item: -item[1].bits_per_target_token)
-        )
-        measured.sort(key=lambda item: (sort_key(item), item[0].id))
-        context_tokens = {
-            atom.id: (
-                count_tokens(atom.rendered)
-                if direction == "forward"
-                else count_tokens(target_text)
-            )
-            for atom in eligible
-        }
-    best_by_id = {atom.id: measurement for atom, measurement, _ in measured}
+    owners = [(atom.id, u) for atom in eligible for u in units(atom)]
+    h_empty, h_given = forward([u[0] for _, u in owners], target_text)
+    b_empty, b_given = reverse(target_text, [u[1] for _, u in owners])
+
+    best_fwd: dict[AtomId, Measurement] = {}
+    best_rev: dict[AtomId, Measurement] = {}
+    for (atom_id, _), hc, b0, bc in zip(owners, h_given, b_empty, b_given, strict=True):
+        fwd, rev = from_mean_nll(h_empty, hc), from_mean_nll(b0, bc)
+        if atom_id not in best_fwd or fwd.ami > best_fwd[atom_id].ami:
+            best_fwd[atom_id] = fwd
+        gain = rev.bits_per_target_token
+        if atom_id not in best_rev or gain > best_rev[atom_id].bits_per_target_token:
+            best_rev[atom_id] = rev
+
+    f_rank = _ordinal({a: m.ami for a, m in best_fwd.items()})
+    r_rank = _ordinal({a: m.bits_per_target_token for a, m in best_rev.items()})
+    fused = {a: 1 / (RRF_K + f_rank[a]) + 1 / (RRF_K + r_rank[a]) for a in f_rank}
+    order = sorted(eligible, key=lambda atom: (-fused[atom.id], atom.id))
+
+    target_tokens = count_tokens(target_text)
     rows = tuple(
         RankRow(
             rank=i,
             atom=atom,
-            measurement=best_by_id[atom.id],
+            measurement=best_fwd[atom.id],
+            score=fused[atom.id],
+            forward_rank=f_rank[atom.id],
+            reverse_rank=r_rank[atom.id],
+            reverse_bits_per_token=best_rev[atom.id].bits_per_target_token,
             body_tokens=count_tokens(atom.body),
-            context_tokens=context_tokens[atom.id],
+            context_tokens=count_tokens(atom.rendered),
             target_tokens=target_tokens,
         )
-        for i, (atom, _, _) in enumerate(measured, start=1)
+        for i, atom in enumerate(order, start=1)
     )
-    return RankResult(
-        rows=rows,
-        excluded_same_leaf=same_leaf,
-        excluded_copy=copies,
-        excluded_junk=junk,
-    )
+    return RankResult(rows=rows, excluded_same_leaf=same_leaf, excluded_copy=copies)
 
 
 def resolve_target(atoms: Sequence[Atom], target: Target) -> tuple[Atom | None, str]:
@@ -229,43 +132,30 @@ def _normalize(text: str) -> str:
 
 
 def select_eligible(
-    atoms: Sequence[Atom],
-    target_atom: Atom | None,
-    target_text: str,
-    filter_junk: bool = False,
-) -> tuple[list[Atom], int, int, int]:
-    """Corpus targets exclude the target's leaf and verbatim copies of the
-    whitespace-normalized target; literal targets use the full pool.
-
-    With ``filter_junk``, candidates whose body contains no alphabetic
-    characters (OCR address soup, bare digit rows) are excluded too — the
-    measured top-rank garbage in fragment queries.
-    """
-    normalized_target = _normalize(target_text)
+    atoms: Sequence[Atom], target_atom: Atom | None, target_text: str
+) -> tuple[list[Atom], int, int]:
+    """Corpus targets exclude their own leaf and verbatim copies of the
+    whitespace-normalized target; literal targets use the full pool."""
+    if target_atom is None:
+        return list(atoms), 0, 0
+    needle = _normalize(target_text)
     eligible: list[Atom] = []
-    same_leaf = copies = junk = 0
+    same_leaf = copies = 0
     for atom in atoms:
-        if target_atom is not None:
-            if atom.path == target_atom.path and atom.span == target_atom.span:
-                same_leaf += 1
-                continue
-            if normalized_target in _normalize(atom.rendered):
-                copies += 1
-                continue
-        if filter_junk and not _HAS_LETTER.search(atom.body):
-            junk += 1
-            continue
-        eligible.append(atom)
-    return eligible, same_leaf, copies, junk
-
-
-_HAS_LETTER = re.compile(r"[A-Za-z]")
+        if atom.path == target_atom.path and atom.span == target_atom.span:
+            same_leaf += 1
+        elif needle in _normalize(atom.rendered):
+            copies += 1
+        else:
+            eligible.append(atom)
+    return eligible, same_leaf, copies
 
 
 @dataclass(frozen=True, slots=True)
 class EvalReport:
     targets: tuple[dict[str, object], ...]
     mrr: float
+    mrr_ci95: tuple[float, float]
     hit_at_3: float
     num_targets: int
     median_body_tokens: float
@@ -276,50 +166,33 @@ class EvalReport:
 def evaluate_links(
     atoms: Sequence[Atom],
     links: Sequence[tuple[str, str]],
-    likelihood: LikelihoodFn,
+    forward: Forward,
+    reverse: Reverse,
     count_tokens: TokenCounter,
     meta: dict[str, object] | None = None,
-    direction: Direction = "forward",
-    reverse_likelihood: ReverseLikelihoodFn | None = None,
-    decompose: bool = False,
-    filter_junk: bool = False,
-    body_only: bool = False,
 ) -> EvalReport:
-    """For each distinct target, find the rank of its first annotated evidence."""
+    """For each distinct target, the rank of its first annotated evidence."""
     by_id = {atom.id: atom for atom in atoms}
     grouped: dict[AtomId, list[AtomId]] = {}
     for target_id, evidence_id in links:
-        if target_id not in by_id:
-            raise ValueError(f"Unknown target_id in links: {target_id}")
-        if evidence_id not in by_id:
-            raise ValueError(f"Unknown evidence_id in links: {evidence_id}")
+        for kind, atom_id in (("target_id", target_id), ("evidence_id", evidence_id)):
+            if atom_id not in by_id:
+                raise ValueError(f"Unknown {kind} in links: {atom_id}")
         grouped.setdefault(AtomId(target_id), []).append(AtomId(evidence_id))
 
     per_target: list[dict[str, object]] = []
     ranks: list[int] = []
-    distinct_bodies: set[str] = set()
+    bodies: set[str] = set()
     for target_id, evidence_ids in grouped.items():
-        result = rank(
-            atoms,
-            CorpusTarget(atom_id=target_id),
-            likelihood,
-            count_tokens,
-            direction=direction,
-            reverse_likelihood=reverse_likelihood,
-            decompose=decompose,
-            filter_junk=filter_junk,
-            body_only=body_only,
-        )
-        found = next(
-            (row.rank for row in result.rows if row.atom.id in evidence_ids), None
-        )
+        result = rank(atoms, CorpusTarget(target_id), forward, reverse, count_tokens)
+        found = next((r.rank for r in result.rows if r.atom.id in evidence_ids), None)
         if found is None:
             raise ValueError(
                 f"Evidence for {target_id} excluded or absent from ranking: "
                 f"{sorted(evidence_ids)}"
             )
         ranks.append(found)
-        distinct_bodies.update(row.atom.body for row in result.rows)
+        bodies.update(r.atom.body for r in result.rows)
         per_target.append(
             {
                 "target_id": target_id,
@@ -329,10 +202,11 @@ def evaluate_links(
             }
         )
 
-    lengths = sorted(count_tokens(body) for body in distinct_bodies)
+    lengths = sorted(count_tokens(body) for body in bodies)
     return EvalReport(
         targets=tuple(per_target),
         mrr=mean_reciprocal_rank(ranks),
+        mrr_ci95=bootstrap_ci(ranks),
         hit_at_3=hit_at_k(ranks, 3),
         num_targets=len(grouped),
         median_body_tokens=percentile(lengths, 0.5),

@@ -18,8 +18,13 @@ def test_fixture_exactly_three_atoms_with_ids_and_spans() -> None:
     ]
     row = atoms[0]
     assert row.span.start == 5 and row.span.end == 5
-    assert row.scope == ("Timer", "Flags", "Bit", "Name", "Meaning")
+    assert row.scope == ("Timer", "Flags", "| Bit | Name | Meaning |")
     assert row.body == "| 3 | OVF | Counter wrapped. |"
+    assert row.cells == ("3", "OVF", "Counter wrapped.")
+    # The spec's four-line context for the first row.
+    assert row.rendered == (
+        "Timer\nFlags\n| Bit | Name | Meaning |\n| 3 | OVF | Counter wrapped. |"
+    )
     sentence = atoms[2]
     assert sentence.scope == ("Timer", "Operation")
     assert sentence.body == "Firmware clears OVF after a counter wrap."
@@ -65,12 +70,13 @@ def test_escaped_pipe_row_and_fenced_code_lines() -> None:
     row = next(a for a in atoms if a.kind == AtomKind.TABLE_ROW)
     # The parser consumes the row; the escaped pipe arrives as a literal pipe.
     assert row.body == "| a|b | pipe cell. |"
+    assert row.cells == ("a|b", "pipe cell.")  # cell boundaries survive
     code = [a for a in atoms if a.kind == AtomKind.CODE_LINE]
     assert [c.body for c in code] == ["int x = 0;", "  y = x + 1;"]
     # Code lines sit on their own source lines relative to the fence opener.
     assert [(c.span.start, c.scope) for c in code] == [
-        (6, ("T", "c")),
-        (8, ("T", "c")),
+        (7, ("T", "c")),
+        (9, ("T", "c")),
     ]
 
 
@@ -104,3 +110,18 @@ def test_long_sentence_split_into_32_word_pieces() -> None:
     assert [len(p.split()) for p in parts] == [32, 32, 6]
     assert len({a.part for a in atoms}) == 3
     assert all(a.span == atoms[0].span for a in atoms)
+
+
+def test_line_atoms_point_at_their_own_source_line() -> None:
+    text = (
+        "# T\n| A | B |\n| - | - |\n| x | y |\n\n"
+        "```c\nint x = 0;\n\n  y = x + 1;\n```\n\n    indented();\n"
+    )
+    lines = text.split("\n")
+    atoms, _ = parse_document("t.md", text)
+    for atom in atoms:
+        source = lines[atom.span.start - 1]
+        if atom.kind == AtomKind.CODE_LINE:
+            assert source.rstrip().endswith(atom.body.strip()), atom
+        else:
+            assert all(cell in source for cell in atom.cells), atom

@@ -1,5 +1,7 @@
 """Pure (relative_path, text) -> atoms transformation."""
 
+from collections.abc import Sequence
+
 import pysbd
 from markdown_it import MarkdownIt
 
@@ -8,6 +10,12 @@ from .records import Atom, AtomKind, SourceSpan
 _MAX_SENTENCE_WORDS = 32
 
 _parser = MarkdownIt("commonmark").enable("table")
+
+
+def _row(cells: Sequence[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
 _segmenter = pysbd.Segmenter(language="en", clean=False)
 
 
@@ -103,8 +111,9 @@ def parse_document(path: str, text: str) -> tuple[tuple[Atom, ...], int]:
                         SourceSpan(row_line, row_line),
                         1,
                         AtomKind.TABLE_ROW,
-                        tuple(headings) + (header or ()),
-                        "| " + " | ".join(cells) + " |",
+                        tuple(headings) + ((_row(header),) if header else ()),
+                        _row(cells),
+                        tuple(cells),
                     )
                 )
             cells = None
@@ -113,7 +122,8 @@ def parse_document(path: str, text: str) -> tuple[tuple[Atom, ...], int]:
         elif ttype == "fence" and token.map:
             language = token.info.split()[0] if token.info.strip() else None
             scope = tuple(headings) + ((language,) if language else ())
-            atoms.extend(_code_atoms(path, scope, token.content, token.map[0] + 1))
+            # Content starts on the line after the opener (one-based: map[0] + 2).
+            atoms.extend(_code_atoms(path, scope, token.content, token.map[0] + 2))
         elif ttype == "code_block" and token.map:
             atoms.extend(
                 _code_atoms(path, tuple(headings), token.content, token.map[0] + 1)

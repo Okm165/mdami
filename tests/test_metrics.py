@@ -5,6 +5,7 @@ import math
 import pytest
 
 from mdami.metrics import (
+    bootstrap_ci,
     from_mean_nll,
     hit_at_k,
     mean_reciprocal_rank,
@@ -46,3 +47,11 @@ def test_percentile_interpolation() -> None:
     assert percentile(values, 0.95) == pytest.approx(3.85)
     assert percentile([5.0], 0.95) == 5.0
     assert percentile([], 0.5) == 0.0
+
+
+def test_bootstrap_ci_brackets_mrr_and_is_deterministic() -> None:
+    ranks = [1, 2, 5, 1, 40, 3, 1, 10]
+    lo, hi = bootstrap_ci(ranks)
+    assert lo <= mean_reciprocal_rank(ranks) <= hi
+    assert bootstrap_ci(ranks) == (lo, hi)
+    assert bootstrap_ci([1, 1, 1]) == (1.0, 1.0)

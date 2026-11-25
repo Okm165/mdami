@@ -6,6 +6,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+from .markdown import parse_document
 from .records import Atom, ParseSummary, RankRow
 
 
@@ -17,8 +18,6 @@ def iter_markdown(root: Path) -> Iterator[tuple[str, str]]:
 
 
 def load_corpus(root: Path) -> tuple[list[Atom], list[ParseSummary]]:
-    from .markdown import parse_document
-
     atoms: list[Atom] = []
     summaries: list[ParseSummary] = []
     for rel, text in iter_markdown(root):
@@ -69,6 +68,9 @@ def rank_row_to_dict(row: RankRow) -> dict[str, object]:
     atom = row.atom
     return {
         "rank": row.rank,
+        "score": row.score,
+        "forward_rank": row.forward_rank,
+        "reverse_rank": row.reverse_rank,
         "atom_id": atom.id,
         "kind": str(atom.kind),
         "path": atom.path,
@@ -82,4 +84,5 @@ def rank_row_to_dict(row: RankRow) -> dict[str, object]:
         "ppl_with_atom": row.measurement.ppl_with_atom,
         "ami": row.measurement.ami,
         "bits_per_target_token": row.measurement.bits_per_target_token,
+        "reverse_bits_per_token": row.reverse_bits_per_token,
     }

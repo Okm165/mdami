@@ -1,28 +1,20 @@
-"""Real-GPU integration against the pinned model, plus GPU-less behavior."""
+"""Real-GPU checks against the pinned model in FP32 (tolerance 1e-4 abs)."""
 
 import math
 
 import pytest
+import torch
+import torch.nn.functional as F
 
-from mdami.gpu import MODEL_ID, REVISION, Scorer
-from mdami.markdown import parse_document
+from mdami import MODEL_ID, REVISION
+from mdami.gpu import Scorer
 
 pytestmark = pytest.mark.gpu
-
-DOC = """# Timer
-## Flags
-| Bit | Name | Meaning |
-| --- | --- | --- |
-| 3 | OVF | Counter wrapped. |
-| 2 | RDY | Data ready. |
-
-## Operation
-Firmware clears OVF after a counter wrap.
-"""
+TOL = 1e-4
 
 CONTEXTS = [
     "Timer\nFlags\n| 3 | OVF | Counter wrapped. |",
-    "Firmware clears OVF after a counter wrap.",  # unequal prefix length
+    "Firmware clears OVF after a counter wrap.",
     "Timer\nOperation\nFirmware clears OVF after a counter wrap.",
 ]
 TARGET = "The OVF bit indicates a counter wrap."
@@ -30,65 +22,55 @@ TARGET = "The OVF bit indicates a counter wrap."
 
 @pytest.fixture(scope="module")
 def scorer() -> Scorer:
-    return Scorer(batch_size=2)
+    return Scorer(batch_size=2)  # forces right padding across rows
 
 
-def test_batched_matches_single_row_forward_passes(scorer: Scorer) -> None:
-    # bf16 logits quantize at ~1e-2 and batched GEMM kernels differ from
-    # single-row kernels; FP32 keeps the tighter 1e-4 tolerance.
-    tolerance = 1e-2 if scorer.meta.dtype == "bfloat16" else 1e-4
-    empty, batched = scorer.score(CONTEXTS, TARGET)
+def test_batched_equals_single_rows_and_order(scorer: Scorer) -> None:
+    empty, batched = scorer.forward(CONTEXTS, TARGET)
     assert all(math.isfinite(v) for v in (empty, *batched))
-    singles: list[float] = []
+    for context, value in zip(CONTEXTS, batched, strict=True):
+        single_empty, (single,) = scorer.forward([context], TARGET)
+        assert single == pytest.approx(value, abs=TOL)
+        assert single_empty == pytest.approx(empty, abs=TOL)
+    _, backward = scorer.forward(CONTEXTS[::-1], TARGET)
+    assert backward[::-1] == pytest.approx(batched, abs=TOL)
+
+
+def test_gathered_kernel_equals_full_logit_reference(scorer: Scorer) -> None:
+    target = scorer.encode(TARGET)
     for context in CONTEXTS:
-        ctx_empty, ctx_nlls = scorer.score([context], TARGET)
-        singles.append(ctx_nlls[0])
-        assert ctx_empty == pytest.approx(empty, abs=tolerance)
-    for batched_nll, single_nll in zip(batched, singles, strict=True):
-        assert batched_nll == pytest.approx(single_nll, rel=2e-2, abs=tolerance)
+        prefix = scorer.prefix(context)
+        ids = torch.tensor([prefix + target], device=scorer.device)
+        with torch.inference_mode():
+            logits = scorer.model(input_ids=ids, use_cache=False).logits[0]
+        rows = torch.arange(len(prefix) - 1, len(prefix) - 1 + len(target))
+        ref = F.cross_entropy(logits[rows].float(), ids[0, rows + 1]).item()
+        assert scorer.nll([(prefix, target)])[0] == pytest.approx(ref, abs=TOL)
 
 
-def test_reversed_candidate_order_preserves_per_row_nll(scorer: Scorer) -> None:
-    tolerance = 1e-2 if scorer.meta.dtype == "bfloat16" else 1e-4
-    _, forward = scorer.score(CONTEXTS, TARGET)
-    _, backward = scorer.score(list(reversed(CONTEXTS)), TARGET)
-    for a, b in zip(forward, reversed(backward), strict=True):
-        assert a == pytest.approx(b, rel=2e-2, abs=tolerance)
+def test_empty_context_equals_empty_prefix(scorer: Scorer) -> None:
+    empty, (with_blank,) = scorer.forward([""], TARGET)
+    assert with_blank == pytest.approx(empty, abs=TOL)
 
 
-def test_identical_context_equals_empty_prefix_within_tolerance(scorer: Scorer) -> None:
-    # The empty candidate "" renders to the framing-only prefix [start]+\n\n.
-    empty, nlls = scorer.score([""], TARGET)
-    assert nlls[0] == pytest.approx(empty, abs=1e-4)
-
-
-def test_sequence_nll_matches_single_row_scoring(scorer: Scorer) -> None:
-    tolerance = 1e-2 if scorer.meta.dtype == "bfloat16" else 1e-4
+def test_reverse_matches_forward_framing_and_caches_prior(scorer: Scorer) -> None:
     for context in CONTEXTS:
-        empties, conds = scorer.sequence_nll(context, [TARGET])
-        ref_empty, ref_conds = scorer.score([context], TARGET)
-        assert empties[0] == pytest.approx(ref_empty, rel=2e-2, abs=tolerance)
-        assert conds[0] == pytest.approx(ref_conds[0], rel=2e-2, abs=tolerance)
+        (prior,), (given,) = scorer.reverse(context, [TARGET])
+        ref_empty, (ref_given,) = scorer.forward([context], TARGET)
+        assert prior == pytest.approx(ref_empty, abs=TOL)
+        assert given == pytest.approx(ref_given, abs=TOL)
+    assert TARGET in scorer._prior
 
 
-def test_empty_target_and_oversize_context_rejected(scorer: Scorer) -> None:
+def test_empty_target_and_oversize_input_rejected(scorer: Scorer) -> None:
     with pytest.raises(ValueError, match="empty"):
-        scorer.score(["ctx"], "")
+        scorer.forward(["ctx"], "")
     with pytest.raises(ValueError, match="context"):
-        scorer.score(["word " * 40000], "x")
+        scorer.forward(["word " * 40000], "x")
 
 
-def test_pin_and_token_counts(scorer: Scorer) -> None:
-    assert scorer.meta.model_revision == REVISION
-    assert scorer.meta.dtype == "bfloat16"
-    atoms, _ = parse_document("timer.md", DOC)
-    row = atoms[0]
-    # Context tokens cover the rendered atom (scope lines above the body),
-    # strictly more than the body alone; framing/target are not included.
-    assert scorer.token_count(row.rendered) > scorer.token_count(row.body)
-    assert scorer.token_count(TARGET) >= 1
-
-
-def test_metadata_logging(scorer: Scorer) -> None:
+def test_pin_dtype_and_metadata(scorer: Scorer) -> None:
+    assert scorer.meta.model_revision == REVISION and scorer.meta.dtype == "float32"
     line = scorer.meta.log_line()
     assert MODEL_ID in line and REVISION in line and "batch_size=2" in line
+    assert scorer.token_count(CONTEXTS[0]) > scorer.token_count("| 3 | OVF |")

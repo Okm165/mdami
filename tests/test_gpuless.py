@@ -16,6 +16,16 @@ def test_atoms_runs_without_model() -> None:
     assert '"atom_id": "timer.md@9.1"' in result.stdout
 
 
+def test_atoms_never_imports_torch() -> None:
+    root = Path(__file__).resolve().parents[1]
+    probe = (
+        "import sys; from mdami.cli import main; "
+        f"main(['atoms', {str(root / 'examples/ocr')!r}]); "
+        "assert 'torch' not in sys.modules, 'atoms loaded torch'"
+    )
+    subprocess.run([sys.executable, "-c", probe], capture_output=True, check=True)
+
+
 def test_rank_requires_gpu() -> None:
     import pytest
     import torch
@@ -32,8 +42,11 @@ def test_rank_requires_gpu() -> None:
         Scorer(batch_size=1)
 
     # The ranking path itself stays device-free.
-    def likelihood(contexts, target):
+    def forward(contexts, target):
         return 1.0, [0.5 for _ in contexts]
 
-    result = rank(atoms, TextTarget(text="sentence"), likelihood, len)
+    def reverse(target, bodies):
+        return [1.0] * len(bodies), [0.5] * len(bodies)
+
+    result = rank(atoms, TextTarget(text="sentence"), forward, reverse, len)
     assert result.pool_size == 1

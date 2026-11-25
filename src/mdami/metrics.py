@@ -1,6 +1,7 @@
 """Pure arithmetic for PPL, AMI, bits per token and retrieval metrics."""
 
 import math
+import random
 from collections.abc import Sequence
 
 from .records import Measurement
@@ -42,3 +43,16 @@ def percentile(values: Sequence[float], p: float) -> float:
     pos = p * (len(s) - 1)
     lo, hi = math.floor(pos), math.ceil(pos)
     return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+
+
+def bootstrap_ci(
+    ranks: Sequence[int], resamples: int = 2000, seed: int = 0
+) -> tuple[float, float]:
+    """95% percentile-bootstrap interval of MRR over targets (deterministic)."""
+    if not ranks:
+        return 0.0, 0.0
+    rng = random.Random(seed)
+    stats = [
+        mean_reciprocal_rank(rng.choices(ranks, k=len(ranks))) for _ in range(resamples)
+    ]
+    return percentile(stats, 0.025), percentile(stats, 0.975)

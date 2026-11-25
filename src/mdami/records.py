@@ -29,6 +29,7 @@ class Atom:
     kind: AtomKind
     scope: tuple[str, ...]
     body: str
+    cells: tuple[str, ...] = ()  # table rows only: parsed cell texts
 
     @property
     def id(self) -> AtomId:
@@ -71,7 +72,11 @@ class Measurement:
 class RankRow:
     rank: int
     atom: Atom
-    measurement: Measurement
+    measurement: Measurement  # best forward unit: h(target | unit)
+    score: float  # fused reciprocal-rank score (the sort key)
+    forward_rank: int
+    reverse_rank: int
+    reverse_bits_per_token: float  # best reverse unit: gain of h(unit | target)
     body_tokens: int
     context_tokens: int
     target_tokens: int
