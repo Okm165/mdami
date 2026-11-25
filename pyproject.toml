@@ -1,7 +1,7 @@
 [project]
 name = "mdami"
-version = "0.1.0"
-description = "Rank Markdown source units by how much they help a frozen causal LM predict an existing target text."
+version = "1.1.0"
+description = "Rank OCR Markdown source units for a target by bidirectional AMI (conditional compression gain) under a frozen causal LM."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

@@ -1,168 +1,138 @@
 # mdami
 
-Ranks Markdown source units (sentences, table rows, code lines) by how much they
-help a frozen causal LM — Qwen/Qwen3-0.6B-Base at a pinned revision — predict
-an existing target text, using the LongCodeZip AMI score.
+Rank the smallest source units of an OCR'd manual (sentences, table cells,
+code lines) by how much information they share with a target, measured as
+**conditional compression gain** under one frozen causal LM.
 
-## Setup
-
-Requires Linux x86-64, Python 3.12, uv, and a visible GPU (AMD ROCm or NVIDIA).
-
-```sh
-uv sync --locked          # installs torch 2.13.0+rocm7.2 and pinned deps
+```
+ manual.md ─▶ atoms ─▶ units ─┬─▶ forward  h(t│u) ─▶ rank ─┐
+                              └─▶ reverse  h(u│t) ─▶ rank ─┴─▶ fuse ─▶ ranked atoms
 ```
 
-## Commands
+No embeddings, index, training or decoding: one forward pass per
+(unit, direction), FP32, exact provenance (`path@line.part`).
 
-```sh
-# Extract atoms (no model needed; JSONL to stdout, summaries to stderr)
-uv run --locked mdami atoms data/ocr
+## Idea
 
-# Rank a corpus against an existing atom or literal text (GPU required)
-uv run --locked mdami rank examples/ocr --target-id 'timer.md@9.1'
-uv run --locked mdami rank data/ocr --text 'timer overflow flag' --batch-size 4
+`h(x│c)` is the mean NLL (nats) of `x` after `[start] E(c) E("\n\n")`.
 
-# Evaluate annotated evidence links (TSV: target_id<TAB>evidence_id)
-uv run --locked mdami eval examples/ocr --links examples/links.tsv
+| step | definition |
+|---|---|
+| atom | sentence ≤ 32 words · table row · code line, with its heading scope |
+| unit | a table row competes as its **cells**; any other atom as itself |
+| forward | `AMI(u,t) = e^{h(t│∅)} − e^{h(t│u)}`: does `u` make `t` predictable? |
+| reverse | `g(u│t) = (h(u│∅) − h(u│t)) / ln 2`: does `t` make `u` predictable? |
+| atom score | best unit per direction, then `1/(60+r_fwd) + 1/(60+r_rev)` |
+
+**Why both directions.** With summed log-probabilities, pointwise mutual
+information is symmetric:
+`log P(t│u) − log P(t) = log P(u│t) − log P(u)`. Forward and reverse are two
+estimates of the same quantity from the model's two factorizations. A finite
+LM is not a consistent joint, so they disagree, and on different atoms.
+Rank fusion averages them without mixing their scales.
+
+## Relation to LongCodeZip
+
+[LongCodeZip](https://arxiv.org/abs/2510.00446) (Shi et al., ASE 2025) ranks
+code chunks for an instruction by `AMI(c,q) = PPL(q) − PPL(q│c)` (eqs. 1–3),
+then refines coarse → fine. mdami keeps that formula and framing as the
+forward direction and changes three things, each measured below:
+
+```
+ LongCodeZip                     mdami
+ function chunks  ──coarse──▶    OCR atoms (sentence / row / code line)
+ blocks           ──fine────▶    table cells, parent keeps its best
+ forward AMI only                forward ⊕ reverse, rank-fused
+ Qwen coder compressor           0.6B base: weakest compressor, sharpest gain
 ```
 
-Redirect stdout to save machine-readable JSONL/JSON; diagnostics go to stderr.
-
-## Checks
+## Quick start
 
 ```sh
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked mypy --strict src/mdami
-uv run --locked pytest                 # add -m gpu to include the real-GPU test
+just sync                                   # locked env (ROCm torch wheel)
+just demo                                   # fixture: 3 atoms, rank, eval
+just top examples/sam3x8e-front "The processor core is an Arm Cortex-M3"
+just eval bench/sam3x8e-tc                  # MRR / Hit@3 on 13 links
+just bench                                  # all manuals → bench/*/report.json
 ```
 
-## Real-manual experiment (SAM3X8E, Timer Counter chapter)
-
-`data/experiments/sam3x8e-tc/` holds a real OCR slice (chapter 36 of
-`Microchip_Technology__SAM3X8ERT__1389537.pdf.md`) and 13 pre-annotated
-procedure→definition links (`links.tsv`, marked before scoring):
+`just gpu=1 batch=64 …` picks the device and batch size. Without `just`:
 
 ```sh
-uv run --locked mdami eval data/experiments/sam3x8e-tc \
-    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32
+uv run --locked mdami rank <dir> --text '<target>' | jq -r .body
 ```
 
-Observed on 2026-11-23 (Qwen2.5-Coder-0.5B, FP32, ROCm 7.2, batch 32, 978 atoms):
-MRR **0.065**, Hit@3 **0.077**, 13 targets, median body 45.5 tokens, p95 171.6.
-Best: ETRGEDG definition rank 3/973, CPCTRG rank 10/958, LDBDIS 6, CPCDIS 8.
-Worst: WAVE definition rank 181 and 227, SWTRG 206, TCCLKS 96. The failure mode
-is visible in the raw rankings: long paragraphs that merely co-mention `WAVE`
-score higher AMI (≈168) than the one-line definition row (≈125), so AMI rewards
-length and lexical co-mention over definitional specificity. Fixture results
-above are separate and trivial (2-candidate pool).
+Targets work best as **statements that exist (or could exist) in the
+manual**, against a directory that actually contains the answer.
 
-Heading-only control (run once with a since-removed flag; same run conditions,
-see `report_scope_control.json`): ranking by body-only gain (h(scope) − h(rendered))
-is **worse**, MRR 0.047 vs 0.065. The heading/header scope carries real signal —
-CPCDIS 8→28, CPCTRG 10→29, BURST 52→101, CLKEN 47→189 under body-only ranking,
-while LDBDIS 6→5 and TCCLKS 96→75 improve. Conclusion: keep whole-atom scoring;
-the earlier length bias does not come from scope credit.
+## Output
 
-Corpus scale: the full `data/ocr` set (418 manuals, 84 MB) parses to
-**1,183,451 atoms**; the 24-manual sample took 19.1 s for 61,636 atoms.
+`rank` emits one JSON object per atom in rank order:
+`rank score forward_rank reverse_rank atom_id kind path span scope body
+body_tokens context_tokens target_tokens ppl_empty ppl_with_atom ami
+bits_per_target_token reverse_bits_per_token`.
+`eval` emits MRR with a 95% bootstrap interval, Hit@3, per-target rank and
+pool size, token stats and run metadata.
 
-## Second-manual validation (SAMD20G, Watchdog Timer chapter)
+## Results
 
-`data/experiments/samd20-wdt/` holds the WDT chapter of
-`ATMEL_Corporation__SAMD20G_14__646708.pdf.md` (338 atoms) and 13 annotated
-procedure→definition links, marked before scoring. Qwen3-0.6B-Base, bf16,
-batch 32: forward AMI **MRR 0.105**, Hit@3 0.077; reverse gain MRR 0.019,
-Hit@3 0.000. Best: SYNCBUSY synchronization rank 2, EWCTRL.EWOFFSET rank 4.
-Worst: mode-of-operation sentences and the 0xA5 CLEAR procedure. This
-validates that forward AMI generalizes to a second manual while the
-reverse-gain direction does not (see the direction table above).
+Qwen3-0.6B-Base, FP32. Each manual has 13 procedure → definition links,
+annotated before scoring. Corpus targets exclude their own leaf and
+verbatim copies.
 
-### Pure-AMI model sweep (same corpus, same 13 links, bf16, batch 32)
+| manual | family · chapter | pool | MRR | 95% CI | Hit@3 |
+|---|---|---|---|---|---|
+| sam3x8e-tc | Cortex-M3 · Timer Counter | 968 | **0.466** | 0.24–0.71 | 0.538 |
+| samd20-wdt | Cortex-M0+ · Watchdog | 327 | **0.152** | 0.07–0.26 | 0.231 |
+| at91sam7-wdt | ARM7TDMI · Watchdog | 102 | **0.463** | 0.27–0.67 | 0.538 |
 
-The **default pin is Qwen3-0.6B-Base** (revision `da87bfb6…`, bfloat16), the
-measured optimum. The original spec pin remains reproducible with
-`--model Qwen/Qwen2.5-Coder-0.5B --revision 8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301 --dtype float32`.
+With 13 links, one target moving from rank 1 to 3 shifts MRR by 0.05. Read
+differences smaller than the interval as noise.
 
-| model | params | MRR | Hit@3 |
-|---|---|---|---|
-| Qwen2.5-Coder-0.5B (FP32 baseline) | 0.49B | 0.065 | 0.077 |
-| **Qwen3-0.6B-Base** | 0.6B | **0.169** | **0.154** |
-| Qwen3.5-0.8B-Base (newest arch, Gated DeltaNet) | 0.8B | 0.141 | 0.154 |
-| Qwen2.5-Coder-1.5B | 1.5B | 0.091 | 0.077 |
-| Qwen2.5-Coder-3B | 3B | 0.022 | 0.000 |
-| Qwen3-8B | 8B | 0.026 | — |
+How we got here, one measured step at a time (git tags):
 
-Raw reports: `qwen3-06b_eval.json`, `qwen25-15b_eval.json`, `qwen25-3b_eval.json`,
-`report_qwen3_8b.json` in this directory. The retrieval-optimal point is the
-smallest model with the newest architecture: Qwen3-0.6B-Base improves MRR 2.6×
-over the 0.5B coder, while every larger model degrades monotonically — stronger
-models compress everything, shrinking the perplexity gap between relevant and
-irrelevant context. To reproduce:
+| step | TC MRR |
+|---|---|
+| `v0.2` spec baseline: Qwen2.5-Coder-0.5B, forward, whole rows | 0.065 |
+| `v0.4` 6-model sweep: smallest/newest base model wins | 0.169 |
+| `v0.6` + reverse direction, rank fusion, cell units (bf16) | 0.516 |
+| `v1.1` one fixed method, FP32-exact kernel (one target 1 → 3; within CI) | 0.466 |
 
-### Scoring direction (Qwen3-0.6B-Base, bf16, batch 32)
+Measured and **dropped**: larger models (1.5B–8B: 0.022–0.091), reverse
+alone (0.019 on one manual), exp-AMI in reverse (mixes in each unit's prior),
+neighbour-sentence windows, query bootstrapping, BM25 prefilter, letter-less
+row filter and heading-free scoring (both noise-level).
 
-| direction | metric ranked | SAM3X8E-TC (13 links) | SAMD20-WDT (13 links) |
-|---|---|---|---|
-| **rrf fusion + `--subatoms`** | fused ranks | **0.516** | **0.152** |
-| rrf fusion | fused ranks | 0.347 | 0.057 |
-| **forward h(target \| atom), AMI = e^{h(∅)} − e^{h(c)}** | PPL difference | 0.169 | **0.105** |
-| reverse h(atom \| target), gain g = h(∅) − h(c) | bits per body token | **0.206** | 0.019 |
+## Rigor
 
-Both directions are pure likelihood quantities — no heuristics. RRF (reciprocal-rank fusion, k=60) combines the two orderings and `--subatoms` lets table rows compete as their `|`-separated fields (parent inherits its best field, max aggregation — LongCodeZip's coarse-to-fine selection). **rrf + subatoms is the best measured configuration on all three manuals** and the recommended setup. Standalone reverse ranking was measured (0.206/0.019, worse on 2/3 manuals) and is no longer exposed; the raw reports remain the record.
+- Forward and reverse use identical framing; batched = single row = reversed
+  order, and the gathered-head kernel equals a full-logit reference
+  (all within 1e-4, FP32, on the real model).
+- Only real target tokens reach the LM head, in bounded chunks; no
+  truncation; oversize inputs fail loudly.
+- `h(u│∅)` is query-independent and cached across targets.
+- Hand-built logits anchor the arithmetic: PPL 4 → 2 gives AMI +2 and
+  +1 bit/token; off-by-one shifts and ragged padding are tested.
 
-```sh
-uv run --locked mdami eval data/experiments/sam3x8e-tc \
-    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \
-    --direction rrf --subatoms
-```
-Raw reports: `report_rrf.json`, `report_rrf_subatoms.json`, `report_rrf_subatoms_junkfree.json`, `report_reverse_default.json`, and the sweep JSONs above.
+**Normalization, measured.** Forward divides by `│t│`, constant per query,
+so it orders by the model's PMI estimate. Reverse divides by `│u│` and orders
+by PMI *density*. Exact total-gain PMI in reverse lost on all three manuals (MRR
+0.216 / 0.120 / 0.334): it re-imports forward's length bias, and the density
+is what makes the two directions complementary.
 
-### Junk filtering
-
-`--filter-junk` excludes candidates whose body has no alphabetic characters
-(OCR digit rows like `| 7 | 6 | 5 |` — the visible garbage in fragment
-queries). Measured neutral-to-slightly-positive on all three link benchmarks
-while removing all letter-less atoms from query output.
-
-`--body-only` scores atom bodies without the heading scope (the reverse
-direction always scores bodies). Measured essentially neutral: forward
-0.156/0.110/0.282 vs 0.169/0.105/0.261 with scope; the rrf+subatoms
-configuration is bit-identical either way (0.517/0.152/0.455). Use it when
-tiny rows must not borrow credit from their headings. Two other features
-were implemented, measured, and **removed** for failing to earn their
-complexity: neighbor-context window units (slightly negative: 0.497/0.133)
-and query self-bootstrapping (drifted on fragments).
-
-```sh
-uv run --locked mdami eval data/experiments/sam3x8e-tc \
-    --links data/experiments/sam3x8e-tc/links.tsv --batch-size 32 \
-    --model /path/to/qwen3-06b --revision local --dtype bfloat16
-```
-
-
-## Third-manual validation (AT91SAM7S64, Watchdog Timer chapter)
-
-`data/experiments/at91sam7-wdt/` holds the WDT chapter of
-`ATMEL_Corporation__AT91SAM7S64_05__241161.pdf.md` (108 atoms, 13 annotated
-links, marked before scoring). Qwen3-0.6B-Base, bf16, batch 32:
-forward plain **0.261**; **rrf + subatoms + filter-junk 0.455 / Hit@3 0.462**.
-This is the third family (AT91 SAM7S, ARM7TDMI) and third OCR export, and it
-confirms the recommended configuration: **rrf + subatoms beats plain forward
-on all three manuals** (0.516/0.455 vs 0.169/0.261) and forward AMI
-generalizes across vendors without tuning.
+**Known gaps.** Very short cells (`0`, `R/W`) get high-variance reverse
+gains. A row takes the max over its cells, so wide rows get more draws.
+Thirteen links per manual is small (hence the interval). The corpus must
+contain the answer.
 
 ## Layout
 
-`src/mdami/records.py` domain records · `markdown.py` parser · `gpu.py` scoring
-adapter · `metrics.py` pure math · `experiment.py` ranking/eligibility ·
-`files.py` I/O · `cli.py` wiring. Fixtures live in `examples/ocr/`; real manual
-input goes in `data/ocr/`.
+```
+src/mdami/  records · markdown (parse) · gpu (only Torch) · metrics · experiment · files · cli
+tests/      CPU: parser, arithmetic, ranking · GPU: -m gpu
+examples/   fixture (timer.md, links.tsv) · sam3x8e-front demo corpus
+bench/      three manual chapters: chapter .md, links.tsv, report.json
+```
 
-### Environment notes (this host)
-
-- If model loading stalls on Hugging Face retries with the flaky network, run
-  with `HF_HUB_OFFLINE=1` — the default checkpoint is fully cached.
-- Model weights used by the sweep lived under `/tmp` (tmpfs, quota'd). The
-  1.5B/3B sweep losers were deleted to free quota; their reports remain the
-  record and `snapshot_download` restores them on demand.
+Manual excerpts are short chapters of vendor datasheets, kept for
+reproducibility. Put your own Markdown in `data/` (git-ignored).

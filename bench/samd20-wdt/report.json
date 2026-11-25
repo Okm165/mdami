@@ -5,7 +5,7 @@
       "evidence_ids": [
         "wdt.md@500.1"
       ],
-      "rank": 84,
+      "rank": 21,
       "pool_size": 327
     },
     {
@@ -13,7 +13,7 @@
       "evidence_ids": [
         "wdt.md@317.1"
       ],
-      "rank": 88,
+      "rank": 27,
       "pool_size": 327
     },
     {
@@ -21,7 +21,7 @@
       "evidence_ids": [
         "wdt.md@339.1"
       ],
-      "rank": 127,
+      "rank": 36,
       "pool_size": 322
     },
     {
@@ -29,7 +29,7 @@
       "evidence_ids": [
         "wdt.md@180.1"
       ],
-      "rank": 21,
+      "rank": 2,
       "pool_size": 322
     },
     {
@@ -37,7 +37,7 @@
       "evidence_ids": [
         "wdt.md@182.1"
       ],
-      "rank": 94,
+      "rank": 185,
       "pool_size": 322
     },
     {
@@ -45,7 +45,7 @@
       "evidence_ids": [
         "wdt.md@316.1"
       ],
-      "rank": 44,
+      "rank": 19,
       "pool_size": 316
     },
     {
@@ -53,7 +53,7 @@
       "evidence_ids": [
         "wdt.md@351.1"
       ],
-      "rank": 194,
+      "rank": 70,
       "pool_size": 316
     },
     {
@@ -61,7 +61,7 @@
       "evidence_ids": [
         "wdt.md@500.1"
       ],
-      "rank": 43,
+      "rank": 3,
       "pool_size": 316
     },
     {
@@ -69,7 +69,7 @@
       "evidence_ids": [
         "wdt.md@464.1"
       ],
-      "rank": 121,
+      "rank": 17,
       "pool_size": 316
     },
     {
@@ -77,7 +77,7 @@
       "evidence_ids": [
         "wdt.md@380.1"
       ],
-      "rank": 42,
+      "rank": 8,
       "pool_size": 316
     },
     {
@@ -85,7 +85,7 @@
       "evidence_ids": [
         "wdt.md@464.1"
       ],
-      "rank": 125,
+      "rank": 14,
       "pool_size": 325
     },
     {
@@ -93,7 +93,7 @@
       "evidence_ids": [
         "wdt.md@340.1"
       ],
-      "rank": 22,
+      "rank": 5,
       "pool_size": 325
     },
     {
@@ -101,16 +101,20 @@
       "evidence_ids": [
         "wdt.md@481.1"
       ],
-      "rank": 63,
+      "rank": 2,
       "pool_size": 310
     }
   ],
-  "mrr": 0.01861069487006455,
-  "hit_at_3": 0.0,
+  "mrr": 0.1517955380958477,
+  "mrr_ci95": [
+    0.06551998976147583,
+    0.2562962007698848
+  ],
+  "hit_at_3": 0.23076923076923078,
   "num_targets": 13,
   "median_body_tokens": 19.0,
   "p95_body_tokens": 43.0,
   "meta": {
-    "run_metadata": "model=Qwen/Qwen3-0.6B-Base@da87bfb608c14b7cf20ba1ce41287e8de496c0cd torch=2.13.0+rocm7.2 backend=HIP 7.2.53211 dtype=bfloat16 device=AMD Radeon Graphics batch_size=32"
+    "run_metadata": "model=Qwen/Qwen3-0.6B-Base@da87bfb608c14b7cf20ba1ce41287e8de496c0cd torch=2.13.0+rocm7.2 backend=HIP 7.2.53211 dtype=float32 device=AMD Radeon Graphics batch_size=32"
   }
 }
