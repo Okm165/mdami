@@ -1,0 +1,4 @@
+The counter restarts by itself every time it matches the compare value.
+The timer measures how long the input pulse stays high.
+A flag reports that the 16-bit count wrapped around.
+The counter keeps running only while its clock is switched on.

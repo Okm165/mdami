@@ -52,12 +52,35 @@ demo:
     {{run}} rank examples/ocr --target-id 'timer.md@9.1' 2>/dev/null | jq -r '"\(.rank)\t\(.body)"'
     {{run}} eval examples/ocr --links examples/links.tsv 2>/dev/null | jq '{mrr, hit_at_3}'
 
-# the three annotated manuals, rewriting each report.json
+# eval every dir with links.tsv + *.md → <dir>/report.json (unprepared dirs skipped)
 bench:
     #!/usr/bin/env bash
     set -euo pipefail
-    for d in bench/*/; do
-      [ -f "$d/links.tsv" ] || continue
+    for d in examples/*/ bench/*/; do
+      [ -f "$d/links.tsv" ] && compgen -G "$d*.md" >/dev/null || { echo "skip $d"; continue; }
       {{run}} eval "$d" --links "$d/links.tsv" --batch-size {{batch}} 2>/dev/null > "$d/report.json"
       jq -r --arg d "$d" '"\($d)\tMRR \(.mrr*1000|round/1000)\tHit@3 \(.hit_at_3*1000|round/1000)"' "$d/report.json"
+    done
+
+# copy bench chapters out of your local data/ocr (line ranges in bench/manifest.tsv)
+bench-prep:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tail -n +2 bench/manifest.tsv | while IFS=$'\t' read -r dir chapter src first last; do
+      sed -n "${first},${last}p" "data/ocr/$src" > "bench/$dir/$chapter" && echo "bench/$dir/$chapter"
+    done
+
+# top-3 ranked atoms for each line of examples/*/queries.txt → ranked.txt
+examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for d in examples/*/; do
+      [ -f "$d/queries.txt" ] || continue
+      { echo "top 3 per query · f/r = forward/reverse rank"
+        while IFS= read -r q; do
+          printf '\n> %s\n' "$q"
+          {{run}} rank "$d" --text "$q" --batch-size {{batch}} 2>/dev/null \
+            | jq -r 'select(.rank <= 3) | "\(.rank)  f\(.forward_rank) r\(.reverse_rank)  \(.atom_id)  \(.body)"'
+        done < "$d/queries.txt"; } > "$d/ranked.txt"
+      echo "$d/ranked.txt"
     done

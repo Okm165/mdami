@@ -56,6 +56,26 @@ def units(atom: Atom) -> list[tuple[str, str]]:
     return [(c, c) for c in cells] or [(atom.rendered, atom.body)]
 
 
+def _once(
+    score: Callable[[list[str]], tuple[float, Sequence[float]]], texts: list[str]
+) -> tuple[float, list[float]]:
+    """Score each distinct text once, so identical units get identical values."""
+    distinct = sorted(set(texts))
+    shared, values = score(distinct)
+    lookup = dict(zip(distinct, values, strict=True))
+    return shared, [lookup[t] for t in texts]
+
+
+def _once_pair(
+    score: Callable[[list[str]], tuple[Sequence[float], Sequence[float]]],
+    texts: list[str],
+) -> tuple[list[float], list[float]]:
+    distinct = sorted(set(texts))
+    prior, given = score(distinct)
+    lookup = dict(zip(distinct, zip(prior, given, strict=True), strict=True))
+    return [lookup[t][0] for t in texts], [lookup[t][1] for t in texts]
+
+
 def _ordinal(score: dict[AtomId, float]) -> dict[AtomId, int]:
     order = sorted(score, key=lambda a: (-score[a], a))
     return {atom_id: i for i, atom_id in enumerate(order, start=1)}
@@ -75,8 +95,12 @@ def rank(
         raise ValueError("No eligible candidates after exclusions.")
 
     owners = [(atom.id, u) for atom in eligible for u in units(atom)]
-    h_empty, h_given = forward([u[0] for _, u in owners], target_text)
-    b_empty, b_given = reverse(target_text, [u[1] for _, u in owners])
+    h_empty, h_given = _once(
+        lambda xs: forward(xs, target_text), [u[0] for _, u in owners]
+    )
+    b_empty, b_given = _once_pair(
+        lambda xs: reverse(target_text, xs), [u[1] for _, u in owners]
+    )
 
     best_fwd: dict[AtomId, Measurement] = {}
     best_rev: dict[AtomId, Measurement] = {}

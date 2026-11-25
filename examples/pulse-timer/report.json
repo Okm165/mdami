@@ -1,0 +1,90 @@
+{
+  "targets": [
+    {
+      "target_id": "manual.md@46.1",
+      "evidence_ids": [
+        "manual.md@29.1"
+      ],
+      "rank": 1,
+      "pool_size": 31
+    },
+    {
+      "target_id": "manual.md@46.2",
+      "evidence_ids": [
+        "manual.md@22.1",
+        "manual.md@24.1"
+      ],
+      "rank": 2,
+      "pool_size": 31
+    },
+    {
+      "target_id": "manual.md@46.3",
+      "evidence_ids": [
+        "manual.md@41.1"
+      ],
+      "rank": 1,
+      "pool_size": 31
+    },
+    {
+      "target_id": "manual.md@51.1",
+      "evidence_ids": [
+        "manual.md@31.1"
+      ],
+      "rank": 1,
+      "pool_size": 32
+    },
+    {
+      "target_id": "manual.md@51.2",
+      "evidence_ids": [
+        "manual.md@39.1"
+      ],
+      "rank": 2,
+      "pool_size": 32
+    },
+    {
+      "target_id": "manual.md@55.1",
+      "evidence_ids": [
+        "manual.md@30.1"
+      ],
+      "rank": 1,
+      "pool_size": 33
+    },
+    {
+      "target_id": "manual.md@58.1",
+      "evidence_ids": [
+        "manual.md@32.1",
+        "manual.md@33.1"
+      ],
+      "rank": 1,
+      "pool_size": 32
+    },
+    {
+      "target_id": "manual.md@58.2",
+      "evidence_ids": [
+        "manual.md@40.1"
+      ],
+      "rank": 1,
+      "pool_size": 32
+    },
+    {
+      "target_id": "manual.md@62.1",
+      "evidence_ids": [
+        "manual.md@38.1"
+      ],
+      "rank": 1,
+      "pool_size": 33
+    }
+  ],
+  "mrr": 0.8888888888888888,
+  "mrr_ci95": [
+    0.7222222222222222,
+    1.0
+  ],
+  "hit_at_3": 1.0,
+  "num_targets": 9,
+  "median_body_tokens": 21.0,
+  "p95_body_tokens": 31.0,
+  "meta": {
+    "run_metadata": "model=Qwen/Qwen3-0.6B-Base@da87bfb608c14b7cf20ba1ce41287e8de496c0cd torch=2.13.0+rocm7.2 backend=HIP 7.2.53211 dtype=float32 device=AMD Radeon Graphics batch_size=32"
+  }
+}

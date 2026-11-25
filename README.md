@@ -51,9 +51,10 @@ forward direction and changes three things, each measured below:
 ```sh
 just sync                                   # locked env (ROCm torch wheel)
 just demo                                   # fixture: 3 atoms, rank, eval
-just top examples/sam3x8e-front "The processor core is an Arm Cortex-M3"
-just eval bench/sam3x8e-tc                  # MRR / Hit@3 on 13 links
-just bench                                  # all manuals → bench/*/report.json
+just top examples/pulse-timer "A flag reports that the count wrapped around."
+just eval examples/pulse-timer              # MRR, 95% CI, Hit@3, per-target ranks
+just examples                               # regenerate examples/*/ranked.txt
+just bench-prep && just bench               # rebuild vendor chapters, then eval all
 ```
 
 `just gpu=1 batch=64 …` picks the device and batch size. Without `just`:
@@ -76,15 +77,19 @@ pool size, token stats and run metadata.
 
 ## Results
 
-Qwen3-0.6B-Base, FP32. Each manual has 13 procedure → definition links,
-annotated before scoring. Corpus targets exclude their own leaf and
-verbatim copies.
+Qwen3-0.6B-Base, FP32, deterministic. Links are procedure → definition,
+annotated before scoring; corpus targets exclude their own leaf and verbatim
+copies.
 
-| manual | family · chapter | pool | MRR | 95% CI | Hit@3 |
+| corpus | family · chapter | pool | MRR | 95% CI | Hit@3 |
 |---|---|---|---|---|---|
-| sam3x8e-tc | Cortex-M3 · Timer Counter | 968 | **0.466** | 0.24–0.71 | 0.538 |
-| samd20-wdt | Cortex-M0+ · Watchdog | 327 | **0.152** | 0.07–0.26 | 0.231 |
-| at91sam7-wdt | ARM7TDMI · Watchdog | 102 | **0.463** | 0.27–0.67 | 0.538 |
+| [pulse-timer](examples/pulse-timer) (original, 9 targets) | fictional · timer | 31 | **0.889** | 0.72–1.00 | 1.000 |
+| sam3x8e-tc (13) | Cortex-M3 · Timer Counter | 968 | **0.517** | 0.29–0.77 | 0.538 |
+| samd20-wdt (13) | Cortex-M0+ · Watchdog | 327 | **0.152** | 0.07–0.26 | 0.231 |
+| at91sam7-wdt (13) | ARM7TDMI · Watchdog | 102 | **0.463** | 0.27–0.67 | 0.538 |
+
+[`ranked.txt`](examples/pulse-timer/ranked.txt) shows the top 3 for four
+paraphrased queries, misses included.
 
 With 13 links, one target moving from rank 1 to 3 shifts MRR by 0.05. Read
 differences smaller than the interval as noise.
@@ -96,7 +101,7 @@ How we got here, one measured step at a time (git tags):
 | `v0.2` spec baseline: Qwen2.5-Coder-0.5B, forward, whole rows | 0.065 |
 | `v0.4` 6-model sweep: smallest/newest base model wins | 0.169 |
 | `v0.6` + reverse direction, rank fusion, cell units (bf16) | 0.516 |
-| `v1.1` one fixed method, FP32-exact kernel (one target 1 → 3; within CI) | 0.466 |
+| `v1.1` one fixed method, FP32-exact deterministic kernel | 0.517 |
 
 Measured and **dropped**: larger models (1.5B–8B: 0.022–0.091), reverse
 alone (0.019 on one manual), exp-AMI in reverse (mixes in each unit's prior),
@@ -110,6 +115,10 @@ row filter and heading-free scoring (both noise-level).
   (all within 1e-4, FP32, on the real model).
 - Only real target tokens reach the LM head, in bounded chunks; no
   truncation; oversize inputs fail loudly.
+- Deterministic: `torch.use_deterministic_algorithms`, no atomic reductions,
+  and each distinct unit text is scored once. Reports are bit-identical
+  across processes and batch sizes, so ties fall to the atom-ID rule rather
+  than to float noise (which had flipped whole ranks before).
 - `h(u│∅)` is query-independent and cached across targets.
 - Hand-built logits anchor the arithmetic: PPL 4 → 2 gives AMI +2 and
   +1 bit/token; off-by-one shifts and ragged padding are tested.
@@ -130,9 +139,13 @@ contain the answer.
 ```
 src/mdami/  records · markdown (parse) · gpu (only Torch) · metrics · experiment · files · cli
 tests/      CPU: parser, arithmetic, ranking · GPU: -m gpu
-examples/   fixture (timer.md, links.tsv) · sam3x8e-front demo corpus
-bench/      three manual chapters: chapter .md, links.tsv, report.json
+examples/   ocr/ spec fixture · pulse-timer/ manual, links, queries, report, ranked.txt
+bench/      links.tsv + report.json per vendor chapter; manifest.tsv line ranges
 ```
 
-Manual excerpts are short chapters of vendor datasheets, kept for
-reproducibility. Put your own Markdown in `data/` (git-ignored).
+Vendor datasheet chapters are not redistributed: `just bench-prep` cuts them
+from your own OCR copies in `data/ocr/` (git-ignored) using
+`bench/manifest.tsv`. A corpus directory should hold only input Markdown,
+since every `*.md` under it is parsed.
+
+MIT licensed.

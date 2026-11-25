@@ -77,8 +77,6 @@ def masked_mean_nll(
     if states.shape[0] == 0 or not bool((counts > 0).all()):
         raise ValueError("Empty batch or empty target row.")
     flat, gold = states[mask], labels[mask]
-    rows = torch.arange(mask.shape[0], device=mask.device)
-    owner = rows[:, None].expand_as(mask)[mask]
     loss = torch.cat(
         [
             F.cross_entropy(
@@ -87,8 +85,9 @@ def masked_mean_nll(
             for i in range(0, len(gold), chunk)
         ]
     )
-    total = torch.zeros(mask.shape[0], device=loss.device).index_add_(0, owner, loss)
-    return total / counts
+    per_slot = torch.zeros(mask.shape, device=loss.device)
+    per_slot[mask] = loss  # exact placement; no atomic accumulation
+    return per_slot.sum(dim=1) / counts
 
 
 class Scorer:
@@ -106,6 +105,7 @@ class Scorer:
                 "Scoring requires a GPU: torch.cuda.is_available() is False. "
                 "The atoms command works without one."
             )
+        torch.use_deterministic_algorithms(True)  # same input, same bits
         self.batch_size = batch_size
         self.device = torch.device("cuda")
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)

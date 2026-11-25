@@ -3,6 +3,8 @@ name = "mdami"
 version = "1.1.0"
 description = "Rank OCR Markdown source units for a target by bidirectional AMI (conditional compression gain) under a frozen causal LM."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch==2.13.0+rocm7.2",

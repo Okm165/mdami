@@ -74,3 +74,11 @@ def test_pin_dtype_and_metadata(scorer: Scorer) -> None:
     line = scorer.meta.log_line()
     assert MODEL_ID in line and REVISION in line and "batch_size=2" in line
     assert scorer.token_count(CONTEXTS[0]) > scorer.token_count("| 3 | OVF |")
+
+
+def test_scores_are_bit_identical_across_runs(scorer: Scorer) -> None:
+    first = scorer.forward(CONTEXTS, TARGET)
+    again = scorer.forward(CONTEXTS, TARGET)
+    assert first == again  # exact equality, not approx
+    priors, _ = scorer.reverse(TARGET, CONTEXTS + CONTEXTS[:1])
+    assert priors[0] == priors[-1]  # duplicate bodies share one value
